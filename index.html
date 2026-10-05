@@ -57,6 +57,12 @@
         .tutanak-table tr:nth-child(even) td { background: #111827; }
 
         .report-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+        .admin-summary-grid { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:10px; margin:14px 0 18px; }
+        .admin-metric { background:#111827; border:1px solid var(--border-color); border-radius:10px; padding:12px; text-align:center; }
+        .admin-metric strong { display:block; font-size:22px; color:var(--accent); margin-top:3px; }
+        .admin-metric span { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.4px; }
+        .jury-ok { color:#34d399; font-weight:700; }
+        .jury-missing { color:#fbbf24; font-weight:700; }
         .mvp-box { background: linear-gradient(135deg, #1e1b4b, #311042); border: 1px solid #4c1d95; padding: 15px; border-radius: 12px; text-align: center; }
         .school-total-box { background: linear-gradient(135deg, #064e3b, #022c22); border: 1px solid #065f46; padding: 15px; border-radius: 12px; text-align: center; }
         .summary-row { display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 14px; }
@@ -77,6 +83,7 @@
         .about-team-item { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); font-weight: bold; color: var(--text-main); display: flex; align-items: center; gap: 10px; }
         .about-team-item:last-child { border-bottom: none; }
 
+        @media (max-width:700px) { .admin-summary-grid { grid-template-columns:1fr 1fr; } }
         @media print { .no-print { display: none !important; } body { background: white; color: black; padding-bottom: 0; } .card { border: none; box-shadow: none; padding: 0; max-width: 100%; } .tutanak-table td, .tutanak-table th { border: 1px solid #000; color: #000; background: #fff !important; } .report-summary-grid { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 15px !important; } .arge-footer { position: relative; margin-top: 50px; bottom: 0; color: #000 !important; opacity: 1; font-weight: bold; } }
     </style>
 </head>
@@ -109,6 +116,9 @@
 
     let secimler = { ...aktifMacSecimleri };
     let verilenPuanlar = {};
+    let puanGonderiliyor = false;
+    let sonRaporVerisi = null;
+    const BEKLENEN_JURILER = ['1. Jüri', '2. Jüri', '3. Jüri'];
     const kSifre = "MTk5Mg=="; 
 
     function anaMenu() {
@@ -146,6 +156,52 @@
 
     function LogSifre(metin) {
         return btoa(metin);
+    }
+
+    // Aynı maç + öğrenci + jüri kombinasyonu için tek aktif puan kaydı üretir.
+    // Böylece çift tıklama / tekrar gönderme toplamları şişirmez.
+    function puanMetniNormalize(v) {
+        return String(v ?? '').normalize('NFC').trim();
+    }
+
+    function hash32(str, seed=2166136261) {
+        let h = seed >>> 0;
+        for (let i = 0; i < str.length; i++) {
+            h ^= str.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        return (h >>> 0).toString(16).padStart(8, '0');
+    }
+
+    function puanKayitKimligi(secimObj, mac) {
+        const s = secimObj || {};
+        const temel = [
+            s.kategori, mac, s.okul, s.ogr, s.juri, s.taraf
+        ].map(puanMetniNormalize).join('|').toLocaleLowerCase('tr-TR');
+        return 'p_' + hash32(temel, 2166136261) + hash32(temel, 3339675911);
+    }
+
+    function puanToplami(v) {
+        const p = (v && v.puanlar) || {};
+        return krit.reduce((toplam, _k, i) => toplam + Number(p[i] ?? p[String(i)] ?? 0), 0);
+    }
+
+    function snapshotKayitlariniTekillestir(snapshot) {
+        const map = new Map();
+        if (!snapshot) return [];
+        snapshot.forEach(c => {
+            const v = c.val();
+            if (!v || !v.secim || !v.puanlar) return;
+            const dogalId = puanKayitKimligi(v.secim, v.mac || 'Genel');
+            // Firebase push anahtarları kronolojik sıralıdır; eski mükerrerlerde son görülen kayıt kazanır.
+            map.set(dogalId, { ...v, _firebaseKey: c.key, _dogalId: dogalId });
+        });
+        return Array.from(map.values());
+    }
+
+    function ogrenciGrupKimligi(v) {
+        const s = v.secim || {};
+        return [v.mac || 'Genel', s.okul || '', (s.ogr || '').split(' (')[0]].map(puanMetniNormalize).join('|');
     }
 
     function sifreliModulKontrol(modulId) {
@@ -281,7 +337,7 @@
         let html = `<div class="card"><h2>Puanlama Tablosu: ${secimler.ogr}</h2>
                     <div style="font-size:14px; color:var(--text-muted); margin-bottom:20px;">Kategori: <b>${secimler.kategori}</b> | Okul: <b>${secimler.okul}</b> | Değerlendiren: <b>${secimler.juri}</b></div>
                     <div id="kriterListesi"></div>
-                    <button class="btn" style="background:var(--success); border:none; margin-top:25px; padding:16px; font-size:16px;" onclick="puanlariGonder()">Puanları Gönder ✓</button>
+                    <button id="btnPuanGonder" class="btn" style="background:var(--success); border:none; margin-top:25px; padding:16px; font-size:16px;" onclick="puanlariGonder()">Puanları Gönder ✓</button>
                     <button class="btn" style="background:#475569" onclick="renderPuanlamaSecim()">← Geri Dön</button></div>`;
         document.getElementById('app').innerHTML = html;
 
@@ -303,21 +359,66 @@
         verilenPuanlar[kriterIndex] = puan;
     }
 
-    function puanlariGonder() {
+    async function puanlariGonder() {
+        if (puanGonderiliyor) return;
         if(Object.keys(verilenPuanlar).length < 13) return alert("Lütfen tüm 13 kriteri puanlayın!");
-        let macKimligi = (secimler.hukOkul && secimler.muhOkul) ? `${secimler.hukOkul}-vs-${secimler.muhOkul}` : "Genel";
 
-        db.ref('puanlar/' + secimler.kategori).push({
-            secim: secimler,
-            puanlar: verilenPuanlar,
-            mac: macKimligi
-        }).then(() => { 
-            alert("Puanlar başarıyla buluta gönderildi!"); 
+        const macKimligi = (secimler.hukOkul && secimler.muhOkul) ? `${secimler.hukOkul}-vs-${secimler.muhOkul}` : "Genel";
+        const kategoriRef = db.ref('puanlar/' + secimler.kategori);
+        const kayitId = puanKayitKimligi(secimler, macKimligi);
+        const btn = document.getElementById('btnPuanGonder');
+
+        puanGonderiliyor = true;
+        if (btn) { btn.disabled = true; btn.innerText = 'Gönderiliyor...'; }
+
+        try {
+            // Hem yeni deterministik kaydı hem de eski push() kayıtlarını aynı doğal kimlikle bul.
+            const tumKayitlar = await kategoriRef.once('value');
+            const eskiAyniKayitlar = [];
+            tumKayitlar.forEach(c => {
+                const v = c.val();
+                if (!v || !v.secim || !v.puanlar) return;
+                if (puanKayitKimligi(v.secim, v.mac || 'Genel') === kayitId) {
+                    eskiAyniKayitlar.push({ key: c.key, value: v });
+                }
+            });
+
+            if (eskiAyniKayitlar.length) {
+                const ogrAd = (secimler.ogr || '').split(' (')[0];
+                const onay = confirm(`${secimler.juri} tarafından ${ogrAd} için daha önce puan gönderilmiş.\n\nYeni puan önceki kaydın yerine geçecek; çift kayıt oluşturulmayacak. Devam edilsin mi?`);
+                if (!onay) return;
+            }
+
+            const onceki = eskiAyniKayitlar.length ? eskiAyniKayitlar[eskiAyniKayitlar.length - 1].value : null;
+            const now = firebase.database.ServerValue.TIMESTAMP;
+            const kayit = {
+                secim: { ...secimler },
+                puanlar: { ...verilenPuanlar },
+                mac: macKimligi,
+                createdAt: onceki?.createdAt || now,
+                updatedAt: now,
+                version: 2
+            };
+
+            // Yeni tekil kaydı yaz, varsa eski mükerrer push kayıtlarını aynı atomik işlemde kaldır.
+            const updates = {};
+            updates[kayitId] = kayit;
+            eskiAyniKayitlar.forEach(x => { if (x.key !== kayitId) updates[x.key] = null; });
+            await kategoriRef.update(updates);
+
+            alert(eskiAyniKayitlar.length ? "Puan güncellendi. Önceki mükerrer kayıtlar tek kayıtta birleştirildi." : "Puanlar başarıyla buluta gönderildi!");
             turnuvaAgacinaPuanYansit(secimler.kategori, secimler.hukOkul, secimler.muhOkul);
             secimler.ogr = '';
             localStorage.setItem('aktifMacSecimleri', JSON.stringify(secimler));
-            renderPuanlamaSecim(); 
-        });
+            renderPuanlamaSecim();
+        } catch (err) {
+            console.error('Puan gönderme hatası:', err);
+            alert('Puan gönderilemedi: ' + (err?.message || err));
+        } finally {
+            puanGonderiliyor = false;
+            const yeniBtn = document.getElementById('btnPuanGonder');
+            if (yeniBtn) { yeniBtn.disabled = false; yeniBtn.innerText = 'Puanları Gönder ✓'; }
+        }
     }
 
     function turnuvaAgacinaPuanYansit(kat, hukOkul, muhOkul) {
@@ -328,10 +429,10 @@
 
         db.ref('puanlar/' + kat).once('value', (s) => {
             let tHuk = 0, tMuh = 0;
-            s.forEach(c => {
-                let v = c.val();
+            const kayitlar = snapshotKayitlariniTekillestir(s);
+            kayitlar.forEach(v => {
                 if(v.mac === `${hukOkul}-vs-${muhOkul}`) {
-                    let toplam = Object.values(v.puanlar).reduce((a,b)=>a+b,0);
+                    const toplam = puanToplami(v);
                     if(v.secim.okul === hukOkul) tHuk += toplam;
                     if(v.secim.okul === muhOkul) tMuh += toplam;
                 }
@@ -387,9 +488,16 @@
 
     function showReport() {
         document.getElementById('app').innerHTML = `
-            <div class="card" style="max-width:1000px;">
-                <h2>Münazara Sonuç Tutanak (${secimler.kategori})</h2>
-                
+            <div class="card" style="max-width:1100px;">
+                <h2>Münazara Sonuç Merkezi (${secimler.kategori})</h2>
+
+                <div id="adminMetrics" class="admin-summary-grid">
+                    <div class="admin-metric"><span>Tekil Puan Kaydı</span><strong>—</strong></div>
+                    <div class="admin-metric"><span>Puanlanan Öğrenci/Maç</span><strong>—</strong></div>
+                    <div class="admin-metric"><span>3/3 Jüri Tamam</span><strong>—</strong></div>
+                    <div class="admin-metric"><span>Jürisi Eksik</span><strong>—</strong></div>
+                </div>
+
                 <div class="report-summary-grid">
                     <div>
                         <h4 style="margin-bottom:8px; color:var(--text-muted);">🏆 En İyi Konuşmacılar (MVP)</h4>
@@ -401,97 +509,178 @@
                     </div>
                 </div>
 
+                <div class="kriter-card" style="margin-bottom:18px;">
+                    <h3 style="margin-top:0; color:var(--text-main);">Jüri Tamamlama Kontrolü</h3>
+                    <div id="juryCoverage" style="overflow-x:auto;">Hesaplanıyor...</div>
+                </div>
+
+                <div class="no-print" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:15px;">
+                    <button class="btn" style="background:var(--success);border:none;margin:0;" onclick="raporuExcelIndir()">Excel İndir (.xlsx)</button>
+                    <button class="btn" style="background:var(--primary);border:none;margin:0;" onclick="window.print()">Yazdır / PDF Al</button>
+                    <button class="btn" style="background:#475569;margin:0;" onclick="renderPuanlamaSecim()">Kapat</button>
+                </div>
+
                 <select id="macFiltre" style="margin-bottom:20px;" class="no-print" onchange="tutanakTablosuDoldur()"><option value="hepsi">Tüm Maçların Genel Raporu</option></select>
                 <div id="rapor-tablosu" style="overflow-x:auto;">Veriler derleniyor...</div>
-                
+
                 <div style="display:flex; justify-content:space-between; margin-top:80px;">
                     <div style="border-top:1px solid #000; width:25%; text-align:center; padding-top:8px; color:var(--text-muted);">1. Jüri İmza</div>
                     <div style="border-top:1px solid #000; width:25%; text-align:center; padding-top:8px; color:var(--text-muted);">2. Jüri İmza</div>
                     <div style="border-top:1px solid #000; width:25%; text-align:center; padding-top:8px; color:var(--text-muted);">3. Jüri İmza</div>
                 </div>
-                <button class="btn no-print" style="background:var(--primary); border:none; margin-top:30px;" onclick="window.print()">🖨️ Yazdır / PDF Al</button>
-                <button class="btn no-print" style="background:#475569;" onclick="renderPuanlamaSecim()">Kapat</button>
             </div>`;
 
         db.ref('puanlar/' + secimler.kategori).once('value', (s) => {
-            let filtre = document.getElementById('macFiltre');
-            let mSet = new Set();
-            let ogrenciPuanlari = {};
-            let okulPuanlari = {};
+            const kayitlar = snapshotKayitlariniTekillestir(s);
+            const filtre = document.getElementById('macFiltre');
+            const mSet = new Set();
+            const ogrenciPuanlari = {};
+            const okulPuanlari = {};
+            const juriGruplari = {};
 
-            s.forEach(c => { 
-                let v = c.val();
-                if(v.mac) mSet.add(v.mac); 
-                
-                let toplamPuan = Object.values(v.puanlar).reduce((a,b)=>a+b,0);
+            kayitlar.forEach(v => {
+                if(v.mac) mSet.add(v.mac);
+                const toplamPuan = puanToplami(v);
+                const secim = v.secim || {};
+                const ogrKisa = (secim.ogr || '').split(' (')[0];
 
-                if(v.secim && v.secim.ogr) {
-                    let temizIsim = v.secim.ogr.split(' (')[0] + " (" + v.secim.okul + ")";
+                if(secim.ogr) {
+                    const temizIsim = ogrKisa + " (" + (secim.okul || '-') + ")";
                     if(!ogrenciPuanlari[temizIsim]) ogrenciPuanlari[temizIsim] = { skor: 0, sayac: 0 };
                     ogrenciPuanlari[temizIsim].skor += toplamPuan;
                     ogrenciPuanlari[temizIsim].sayac += 1;
+
+                    const gk = ogrenciGrupKimligi(v);
+                    if(!juriGruplari[gk]) juriGruplari[gk] = {
+                        mac: v.mac || 'Genel', okul: secim.okul || '-', ogrenci: ogrKisa, juriler: new Set(), toplam: 0, sayac: 0
+                    };
+                    if(secim.juri) juriGruplari[gk].juriler.add(secim.juri);
+                    juriGruplari[gk].toplam += toplamPuan;
+                    juriGruplari[gk].sayac += 1;
                 }
 
-                if(v.secim && v.secim.okul) {
-                    if(!okulPuanlari[v.secim.okul]) okulPuanlari[v.secim.okul] = 0;
-                    okulPuanlari[v.secim.okul] += toplamPuan;
+                if(secim.okul) {
+                    if(!okulPuanlari[secim.okul]) okulPuanlari[secim.okul] = 0;
+                    okulPuanlari[secim.okul] += toplamPuan;
                 }
             });
 
-            if(filtre) { mSet.forEach(m => filtre.innerHTML += `<option value="${m}">${m.replace('-vs-', ' VS ')}</option>`); }
-            
-            let siralıList = Object.keys(ogrenciPuanlari).map(isim => {
-                return { isim: isim, ortalama: (ogrenciPuanlari[isim].skor / ogrenciPuanlari[isim].sayac).toFixed(1) };
-            }).sort((a,b) => b.ortalama - a.ortalama);
+            if(filtre) {
+                [...mSet].sort((a,b)=>a.localeCompare(b,'tr')).forEach(m => filtre.innerHTML += `<option value="${m}">${m.replace('-vs-', ' VS ')}</option>`);
+            }
 
-            let podium = document.getElementById('mvp-podium');
-            if(siralıList.length > 0) {
+            const siraliList = Object.keys(ogrenciPuanlari).map(isim => ({
+                isim,
+                ortalama: Number((ogrenciPuanlari[isim].skor / ogrenciPuanlari[isim].sayac).toFixed(1)),
+                juriSayisi: ogrenciPuanlari[isim].sayac
+            })).sort((a,b) => b.ortalama - a.ortalama);
+
+            const podium = document.getElementById('mvp-podium');
+            if(siraliList.length > 0) {
                 podium.innerHTML = "";
-                for(let i=0; i<Math.min(3, siralıList.length); i++) {
-                    podium.innerHTML += `
-                        <div class="summary-row">
-                            <span class="summary-name">${siralıList[i].isim.split(' (')[0]}</span>
-                            <span class="summary-score">${siralıList[i].ortalama} Ort.</span>
-                        </div>`;
+                for(let i=0; i<Math.min(3, siraliList.length); i++) {
+                    podium.innerHTML += `<div class="summary-row"><span class="summary-name">${siraliList[i].isim.split(' (')[0]}</span><span class="summary-score">${siraliList[i].ortalama.toFixed(1)} Ort.</span></div>`;
                 }
             } else { podium.innerHTML = "Veri yok."; }
 
-            let siralıOkullar = Object.keys(okulPuanlari).map(oAd => {
-                return { isim: oAd, toplam: okulPuanlari[oAd] };
-            }).sort((a,b) => b.toplam - a.toplam);
-
-            let schoolBoard = document.getElementById('school-leaderboard');
-            if(siralıOkullar.length > 0) {
+            const siraliOkullar = Object.keys(okulPuanlari).map(oAd => ({ isim:oAd, toplam:okulPuanlari[oAd] })).sort((a,b)=>b.toplam-a.toplam);
+            const schoolBoard = document.getElementById('school-leaderboard');
+            if(siraliOkullar.length > 0) {
                 schoolBoard.innerHTML = "";
-                siralıOkullar.forEach((okulData, index) => {
-                    schoolBoard.innerHTML += `
-                        <div class="summary-row">
-                            <span class="summary-name">${index+1}. ${okulData.isim}</span>
-                            <span class="summary-score">${okulData.toplam} Puan</span>
-                        </div>`;
+                siraliOkullar.forEach((okulData, index) => {
+                    schoolBoard.innerHTML += `<div class="summary-row"><span class="summary-name">${index+1}. ${okulData.isim}</span><span class="summary-score">${okulData.toplam} Puan</span></div>`;
                 });
             } else { schoolBoard.innerHTML = "Veri yok."; }
 
+            const juriRows = Object.values(juriGruplari).sort((a,b) => (a.mac+a.okul+a.ogrenci).localeCompare(b.mac+b.okul+b.ogrenci,'tr'));
+            const tamSayisi = juriRows.filter(x => BEKLENEN_JURILER.every(j => x.juriler.has(j))).length;
+            const eksikSayisi = juriRows.length - tamSayisi;
+            const metrics = document.getElementById('adminMetrics');
+            if(metrics) metrics.innerHTML = `
+                <div class="admin-metric"><span>Tekil Puan Kaydı</span><strong>${kayitlar.length}</strong></div>
+                <div class="admin-metric"><span>Puanlanan Öğrenci/Maç</span><strong>${juriRows.length}</strong></div>
+                <div class="admin-metric"><span>3/3 Jüri Tamam</span><strong>${tamSayisi}</strong></div>
+                <div class="admin-metric"><span>Jürisi Eksik</span><strong>${eksikSayisi}</strong></div>`;
+
+            const coverage = document.getElementById('juryCoverage');
+            if(coverage) {
+                let html = '<table class="tutanak-table"><tr><th>Maç</th><th>Okul</th><th>Öğrenci</th><th>Jüri Durumu</th><th>Eksik Jüri</th><th>Ortalama</th></tr>';
+                juriRows.forEach(x => {
+                    const eksikler = BEKLENEN_JURILER.filter(j => !x.juriler.has(j));
+                    const tam = eksikler.length === 0;
+                    const ort = x.sayac ? (x.toplam / x.sayac).toFixed(1) : '-';
+                    html += `<tr><td>${x.mac.replace('-vs-',' VS ')}</td><td>${x.okul}</td><td>${x.ogrenci}</td><td class="${tam?'jury-ok':'jury-missing'}">${x.juriler.size}/3</td><td>${tam ? '—' : eksikler.join(', ')}</td><td>${ort}</td></tr>`;
+                });
+                coverage.innerHTML = html + '</table>';
+            }
+
+            sonRaporVerisi = { kategori: secimler.kategori, kayitlar, juriRows, siraliList, siraliOkullar };
             tutanakTablosuDoldur();
+        }).catch(err => {
+            console.error('Rapor verisi okunamadı:', err);
+            alert('Sonuçlar okunamadı: ' + (err?.message || err));
         });
     }
 
     function tutanakTablosuDoldur() {
-        let fElement = document.getElementById('macFiltre');
-        let seciliMac = fElement ? fElement.value : "hepsi";
-        db.ref('puanlar/' + secimler.kategori).once('value', (s) => {
-            let html = '<table class="tutanak-table"><tr><th>Taraf</th><th>Okul</th><th>Öğrenci</th><th>Jüri</th>' + 
+        const fElement = document.getElementById('macFiltre');
+        const seciliMac = fElement ? fElement.value : "hepsi";
+
+        const render = (kayitlar) => {
+            let html = '<table class="tutanak-table"><tr><th>Taraf</th><th>Okul</th><th>Öğrenci</th><th>Jüri</th>' +
                        krit.map(k => `<th>${k.t.substring(0,4)}.</th>`).join('') + '<th>TOPLAM</th></tr>';
-            s.forEach(c => { 
-                let v = c.val(); 
+            kayitlar.forEach(v => {
                 if(seciliMac !== "hepsi" && v.mac !== seciliMac) return;
-                let ps = Object.values(v.puanlar); 
-                let t = ps.reduce((a,b)=>a+b,0);
-                html += `<tr><td>${v.secim.taraf}</td><td>${v.secim.okul || '-'}</td><td>${v.secim.ogr.split(' (')[0]}</td><td>${v.secim.juri}</td>` + 
-                        ps.map(p => `<td>${p}</td>`).join('') + `<td><b style="color:var(--accent);">${t}</b></td></tr>`; 
+                const ps = krit.map((_k,i) => Number(v.puanlar?.[i] ?? v.puanlar?.[String(i)] ?? 0));
+                const t = ps.reduce((a,b)=>a+b,0);
+                html += `<tr><td>${v.secim.taraf}</td><td>${v.secim.okul || '-'}</td><td>${(v.secim.ogr || '').split(' (')[0]}</td><td>${v.secim.juri}</td>` +
+                        ps.map(p => `<td>${p}</td>`).join('') + `<td><b style="color:var(--accent);">${t}</b></td></tr>`;
             });
             document.getElementById('rapor-tablosu').innerHTML = html + '</table>';
+        };
+
+        if(sonRaporVerisi && sonRaporVerisi.kategori === secimler.kategori) return render(sonRaporVerisi.kayitlar);
+        db.ref('puanlar/' + secimler.kategori).once('value', s => render(snapshotKayitlariniTekillestir(s)));
+    }
+
+    function raporuExcelIndir() {
+        if(!sonRaporVerisi || !sonRaporVerisi.kayitlar?.length) return alert('Excel için puan verisi bulunamadı.');
+
+        const puanRows = sonRaporVerisi.kayitlar.map(v => {
+            const satir = {
+                'Kategori': sonRaporVerisi.kategori,
+                'Maç': (v.mac || 'Genel').replace('-vs-', ' VS '),
+                'Taraf': v.secim?.taraf || '',
+                'Okul': v.secim?.okul || '',
+                'Öğrenci': (v.secim?.ogr || '').split(' (')[0],
+                'Jüri': v.secim?.juri || ''
+            };
+            krit.forEach((k,i) => satir[`${i+1}. ${k.t}`] = Number(v.puanlar?.[i] ?? v.puanlar?.[String(i)] ?? 0));
+            satir['Toplam'] = puanToplami(v);
+            satir['Son Güncelleme'] = v.updatedAt ? new Date(v.updatedAt).toLocaleString('tr-TR') : '';
+            return satir;
         });
+
+        const juriRows = sonRaporVerisi.juriRows.map(x => {
+            const eksikler = BEKLENEN_JURILER.filter(j => !x.juriler.has(j));
+            return {
+                'Maç': x.mac.replace('-vs-',' VS '), 'Okul':x.okul, 'Öğrenci':x.ogrenci,
+                'Jüri Sayısı':x.juriler.size, 'Tamamlayan Jüriler':[...x.juriler].join(', '),
+                'Eksik Jüriler':eksikler.join(', '), 'Ortalama':x.sayac ? Number((x.toplam/x.sayac).toFixed(1)) : ''
+            };
+        });
+
+        const okulRows = sonRaporVerisi.siraliOkullar.map((x,i)=>({'Sıra':i+1,'Okul':x.isim,'Toplam Puan':x.toplam}));
+        const mvpRows = sonRaporVerisi.siraliList.map((x,i)=>({'Sıra':i+1,'Öğrenci':x.isim.split(' (')[0],'Okul':(x.isim.match(/\((.*)\)$/)||[])[1]||'','Ortalama':x.ortalama,'Jüri Kaydı':x.juriSayisi}));
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(puanRows), 'Puanlar');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(juriRows), 'Juri Durumu');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(okulRows), 'Okul Ozeti');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mvpRows), 'MVP');
+
+        const tarih = new Date().toISOString().slice(0,10);
+        XLSX.writeFile(wb, `Munazara_Sonuclari_${sonRaporVerisi.kategori}_${tarih}.xlsx`);
     }
 
     // --- ÖĞRENCİ YÖNETİMİ & DOĞRUDAN EXCEL (.XLSX) YÜKLEME ---
