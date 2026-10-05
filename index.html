@@ -523,51 +523,145 @@
         okulListesiniYenile();
     }
 
-    function firebaseKeyTemizle(isim) {
-        // Firebase yolunda hata verebilecek karakterleri (. # $ / [ ]) temizler
-        return String(isim).replace(/[\.\#\$\/\[\]]/g, '').trim();
+    // --- TÜRKÇE KARAKTER / EXCEL-CSV KODLAMA YARDIMCILARI ---
+    function turkceMetinDuzelt(deger) {
+        let s = String(deger ?? '')
+            .replace(/^\uFEFF/, '')
+            .replace(/\u00A0/g, ' ')
+            .normalize('NFC')
+            .trim();
+
+        // UTF-8 metnin Windows-1252/ISO-8859 türevleriyle yanlış çözülmesinden
+        // doğan yaygın "mojibake" karakterlerini düzeltir.
+        const bozukKarakterler = {
+            'Ã§':'ç', 'Ã‡':'Ç', 'ÄŸ':'ğ', 'Äž':'Ğ', 'Ä±':'ı', 'Ä°':'İ',
+            'Ã¶':'ö', 'Ã–':'Ö', 'ÅŸ':'ş', 'Åž':'Ş', 'Ã¼':'ü', 'Ãœ':'Ü',
+            'â€™':'’', 'â€œ':'“', 'â€':'”', 'â€“':'–', 'â€”':'—', 'Â':'',
+            'ï»¿':''
+        };
+        for (const [bozuk, dogru] of Object.entries(bozukKarakterler)) {
+            s = s.split(bozuk).join(dogru);
+        }
+        return s.normalize('NFC').trim();
     }
 
-    function excelTopluYukle() {
+    function csvBufferCoz(buffer) {
+        const bytes = new Uint8Array(buffer);
+
+        // BOM varsa doğrudan doğru kodlamayı kullan.
+        if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+            return { text: new TextDecoder('utf-8').decode(bytes), encoding: 'UTF-8 BOM' };
+        }
+        if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+            return { text: new TextDecoder('utf-16le').decode(bytes), encoding: 'UTF-16 LE' };
+        }
+        if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+            return { text: new TextDecoder('utf-16be').decode(bytes), encoding: 'UTF-16 BE' };
+        }
+
+        // Önce gerçek UTF-8 dene. Hatalı byte varsa Windows-1254'e düş.
+        try {
+            return {
+                text: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+                encoding: 'UTF-8'
+            };
+        } catch (_) {
+            try {
+                return {
+                    text: new TextDecoder('windows-1254').decode(bytes),
+                    encoding: 'Windows-1254'
+                };
+            } catch (_) {
+                return {
+                    text: new TextDecoder('iso-8859-9').decode(bytes),
+                    encoding: 'ISO-8859-9'
+                };
+            }
+        }
+    }
+
+    function firebaseKeyTemizle(isim) {
+        // Önce Unicode'u normalize et; sonra Firebase yolunda yasak karakterleri temizle.
+        // Türkçe karakterler (ÇĞİÖŞÜ / çğıöşü) Firebase anahtarlarında korunur.
+        return turkceMetinDuzelt(isim).replace(/[\.\#\$\/\[\]]/g, '').trim();
+    }
+
+    async function excelTopluYukle() {
         let fileInput = document.getElementById('excelDosya');
         if(!fileInput.files.length) return alert("Lütfen bir Excel (.xlsx) veya CSV dosyası seçin!");
-        
+
         let file = fileInput.files[0];
         let reader = new FileReader();
 
-        reader.onload = function(e) {
+        reader.onload = async function(e) {
             try {
-                let data = new Uint8Array(e.target.result);
-                let workbook = XLSX.read(data, { type: 'array' });
-                let firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                let rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+                const buffer = e.target.result;
+                const ad = (file.name || '').toLocaleLowerCase('tr-TR');
+                let workbook;
+                let algilananKodlama = '';
 
+                if (ad.endsWith('.csv')) {
+                    const sonuc = csvBufferCoz(buffer);
+                    algilananKodlama = sonuc.encoding;
+                    workbook = XLSX.read(sonuc.text, { type: 'string', raw: false });
+                } else {
+                    // XLSX/XLS dosyaları Unicode'u doğal olarak taşır.
+                    workbook = XLSX.read(buffer, { type: 'array', cellText: true, cellDates: true });
+                }
+
+                if (!workbook.SheetNames || !workbook.SheetNames.length) {
+                    throw new Error('Dosyada çalışma sayfası bulunamadı.');
+                }
+
+                let firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                let rows = XLSX.utils.sheet_to_json(firstSheet, {
+                    header: 1,
+                    raw: false,
+                    defval: ''
+                });
+
+                const yazmaIslemleri = [];
                 let yuklemeSayisi = 0;
+                let atlananSayisi = 0;
+
                 for (let i = 1; i < rows.length; i++) {
                     let row = rows[i];
                     if (!row || row.length === 0) continue;
 
-                    let schoolRaw = row[0] ? String(row[0]).trim() : '';
-                    let student = row[1] ? String(row[1]).trim() : '';
+                    let schoolRaw = turkceMetinDuzelt(row[0]);
+                    let student = turkceMetinDuzelt(row[1]);
                     let schoolName = firebaseKeyTemizle(schoolRaw);
 
-                    if (schoolName && student && schoolName !== "Okul Adı") {
-                        db.ref('okullar/' + secimler.kategori + '/' + schoolName).push(student);
+                    if (schoolName && student && schoolName.toLocaleLowerCase('tr-TR') !== 'okul adı') {
+                        yazmaIslemleri.push(
+                            db.ref('okullar/' + secimler.kategori + '/' + schoolName).push(student)
+                        );
                         yuklemeSayisi++;
+                    } else if (schoolRaw || student) {
+                        atlananSayisi++;
                     }
                 }
 
                 if (yuklemeSayisi > 0) {
-                    alert(`${yuklemeSayisi} adet öğrenci (${secimler.kategori}) listesine başarıyla aktarıldı!`);
+                    // Firebase yazmaları bitmeden "başarılı" demeyelim.
+                    await Promise.all(yazmaIslemleri);
+
+                    let ekBilgi = algilananKodlama ? `\nCSV kodlaması: ${algilananKodlama}` : '';
+                    if (atlananSayisi) ekBilgi += `\nAtlanan satır: ${atlananSayisi}`;
+                    alert(`${yuklemeSayisi} adet öğrenci (${secimler.kategori}) listesine başarıyla aktarıldı!${ekBilgi}`);
                     fileInput.value = '';
                     okulListesiniYenile();
                 } else {
-                    alert("Yüklenecek kayıt bulunamadı. Lütfen dosyadaki satırları kontrol edin.");
+                    alert("Yüklenecek kayıt bulunamadı. Sütunların 'Okul Adı' ve 'Öğrenci Ad Soyad' sırasıyla geldiğini kontrol edin.");
                 }
             } catch (err) {
-                console.error(err);
-                alert("Dosya okunurken bir hata oluştu!");
+                console.error('Excel/CSV aktarım hatası:', err);
+                alert("Dosya okunurken bir hata oluştu: " + (err?.message || err));
             }
+        };
+
+        reader.onerror = function() {
+            alert("Dosya tarayıcı tarafından okunamadı.");
         };
 
         reader.readAsArrayBuffer(file);
@@ -589,15 +683,18 @@
     }
 
     function ogrenciKaydet() {
-        let school = document.getElementById('okulAd').value.trim();
-        let student = document.getElementById('ogrAd').value.trim();
+        let school = turkceMetinDuzelt(document.getElementById('okulAd').value);
+        let student = turkceMetinDuzelt(document.getElementById('ogrAd').value);
         if(!school || !student) return alert("Lütfen alanları boş bırakmayın!");
-        
+
         let temizOkul = firebaseKeyTemizle(school);
         db.ref('okullar/' + secimler.kategori + '/' + temizOkul).push(student).then(() => {
             alert("Öğrenci başarıyla veritabanına kaydedildi!");
-            document.getElementById('ogrAd').value = ""; 
+            document.getElementById('ogrAd').value = "";
             okulListesiniYenile();
+        }).catch((err) => {
+            console.error('Öğrenci kaydetme hatası:', err);
+            alert("Öğrenci kaydedilemedi: " + (err?.message || err));
         });
     }
 
