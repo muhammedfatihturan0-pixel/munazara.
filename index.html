@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Münazara Yönetim Sistemi Pro</title>
+    <!-- Firebase Kütüphaneleri -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+    <!-- Excel (.xlsx) Okuma Kütüphanesi (SheetJS) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <script>
+        const firebaseConfig = { apiKey: "AIzaSyDzcMGZVA7bwHK-27QEKh9KyWl4kJ290w0", databaseURL: "https://munazara-dd98d-default-rtdb.firebaseio.com", projectId: "munazara-dd98d" };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+    </script>
+    <style>
+        :root {
+            --bg-main: #1e293b;
+            --bg-card: #0f172a;
+            --border-color: #334155;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #3b82f6;
+            --hukumet: #ef4444;
+            --muhalefet: #06b6d4;
+            --success: #10b981;
+            --accent: #facc15;
+        }
+
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-main); padding: 20px; color: var(--text-main); margin: 0; min-height: 100vh; position: relative; padding-bottom: 60px; box-sizing: border-box; }
+        .card { background: var(--bg-card); padding: 30px; border-radius: 16px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.4); max-width: 850px; margin: 20px auto; border: 1px solid var(--border-color); }
+        h2 { font-size: 24px; font-weight: 700; margin-top: 0; margin-bottom: 20px; border-bottom: 2px solid var(--border-color); padding-bottom: 10px; color: var(--text-main); }
+        h3 { color: var(--text-muted); font-size: 18px; margin-top: 25px; }
+
+        .btn { display: block; width: 100%; padding: 14px; margin: 8px 0; background: #1e293b; color: var(--text-main); border: 1px solid var(--border-color); border-radius: 10px; cursor: pointer; font-weight: bold; text-align: center; transition: all 0.2s ease; font-size: 15px; }
+        .btn:hover { background: #334155; transform: translateY(-1px); }
+        .btn-active { background: var(--success) !important; border-color: var(--success); box-shadow: 0 0 12px rgba(16, 185, 129, 0.4); }
+        
+        input, textarea, select { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid var(--border-color); border-radius: 10px; box-sizing: border-box; background: #1e293b; color: var(--text-main); font-size: 15px; transition: border 0.2s; }
+        input:focus, select:focus { border-color: var(--primary); outline: none; }
+        
+        .btn-grid { display: grid; gap: 8px; margin: 12px 0; }
+        .kat-btn { background: #1e293b; border: 1px solid var(--border-color); color: var(--text-muted); }
+        .kat-btn.btn-active { background: var(--primary) !important; border-color: var(--primary); box-shadow: 0 0 12px rgba(59, 130, 246, 0.4); }
+        
+        .kriter-card { background: #111827; padding: 18px; border-radius: 12px; margin-bottom: 12px; border: 1px solid var(--border-color); }
+        .kriter-label { font-weight: 600; font-size: 14px; color: var(--text-main); display: block; }
+        .puan-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+        .puan-btn { width: 38px; height: 38px; border: 1px solid var(--border-color); border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; background: #1f2937; color: var(--text-muted); transition: all 0.15s; font-weight: bold; }
+        .puan-btn:hover { color: #fff; border-color: #64748b; }
+        .puan-btn.selected { background: var(--success); color: white; border-color: var(--success); box-shadow: 0 0 10px rgba(16,185,129,0.4); }
+
+        .tutanak-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 20px; border-radius: 8px; overflow: hidden; }
+        .tutanak-table th { background: #111827; color: var(--text-muted); padding: 12px; border: 1px solid var(--border-color); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+        .tutanak-table td { padding: 12px; border: 1px solid var(--border-color); text-align: center; background: #161e2e; }
+        .tutanak-table tr:nth-child(even) td { background: #111827; }
+
+        .report-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+        .mvp-box { background: linear-gradient(135deg, #1e1b4b, #311042); border: 1px solid #4c1d95; padding: 15px; border-radius: 12px; text-align: center; }
+        .school-total-box { background: linear-gradient(135deg, #064e3b, #022c22); border: 1px solid #065f46; padding: 15px; border-radius: 12px; text-align: center; }
+        .summary-row { display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 14px; }
+        .summary-name { font-weight: bold; color: var(--text-main); }
+        .summary-score { font-weight: 800; color: var(--accent); }
+
+        .match-box { border: 1px solid var(--border-color); padding: 18px; margin: 10px; border-radius: 12px; width: 250px; display: inline-block; vertical-align: top; text-align: left; background: #111827; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); }
+        .match-team { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; padding: 4px 0; }
+        .skor-input { width: 65px; text-align: center; padding: 6px; margin: 0; border: 1px solid var(--border-color); border-radius: 6px; font-weight: bold; background: #0f172a; color: #fff; }
+        .win-tag { margin-top: 12px; padding: 8px; background: rgba(16, 185, 129, 0.15); color: #34d399; border-radius: 6px; font-weight: bold; font-size: 12px; text-align: center; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .old-tur { margin-top: 25px; border-top: 2px dashed var(--border-color); padding-top: 15px; }
+        .champ-card { background: linear-gradient(135deg, #fef08a, #facc15); border: none; padding: 30px; border-radius: 14px; text-align: center; font-size: 26px; font-weight: 800; color: #713f12; margin: 25px 0; box-shadow: 0 10px 20px rgba(250,204,21,0.3); animation: pulse 2s infinite; }
+        
+        .file-upload-wrapper { border: 2px dashed var(--border-color); padding: 20px; border-radius: 10px; text-align: center; background: #111827; margin: 15px 0; }
+        
+        .arge-footer { position: absolute; bottom: 15px; left: 0; width: 100%; text-align: center; font-size: 12px; color: var(--text-muted); opacity: 0.7; letter-spacing: 0.5px; }
+        .about-team-list { text-align: left; background: #111827; padding: 20px; border-radius: 12px; border: 1px solid var(--border-color); margin: 20px 0; }
+        .about-team-item { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); font-weight: bold; color: var(--text-main); display: flex; align-items: center; gap: 10px; }
+        .about-team-item:last-child { border-bottom: none; }
+
+        @media print { .no-print { display: none !important; } body { background: white; color: black; padding-bottom: 0; } .card { border: none; box-shadow: none; padding: 0; max-width: 100%; } .tutanak-table td, .tutanak-table th { border: 1px solid #000; color: #000; background: #fff !important; } .report-summary-grid { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 15px !important; } .arge-footer { position: relative; margin-top: 50px; bottom: 0; color: #000 !important; opacity: 1; font-weight: bold; } }
+    </style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<div class="arge-footer">
+    © 2026 Iğdır Millî Eğitim Müdürlüğü — Tüm Hakları Saklıdır.
+</div>
+
+<script>
+    const krit = [
+        {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
+        {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
+        {t:"Materyal Kullanımı", m:5}, {t:"Karşıt Görüşe Cevap Verebilme", m:10}, {t:"Saygılı ve Etkin Üslup Kullanımı", m:10},
+        {t:"Tartışmanın Farklı ve Derin Bir Biçimde Ele Alınması", m:10}, {t:"Konuşma Süresini Etkin Kullanabiliyor mu?", m:10},
+        {t:"Konuşma İyi Planlanmış mı?", m:10}, {t:"Konuşma Esnasında Konu Bütünlüğü Sağlanıyor mu?", m:5}
+    ];
+
+    let aktifMacSecimleri = JSON.parse(localStorage.getItem('aktifMacSecimleri')) || {
+        kategori: 'ORTAOKUL',
+        hukOkul: '',
+        muhOkul: '',
+        taraf: '',
+        juri: '',
+        ogr: '',
+        okul: ''
+    };
+
+    let secimler = { ...aktifMacSecimleri };
+    let verilenPuanlar = {};
+    const kSifre = "MTk5Mg=="; 
+
+    function anaMenu() {
+        document.getElementById('app').innerHTML = `
+            <div class="card" style="text-align:center;">
+                <h2 style="border:none; margin-bottom:30px; font-size:28px; letter-spacing:0.5px;">MÜNAZARA KONTROL PANELİ</h2>
+                <button class="btn" style="padding:18px; background:var(--primary); border:none;" onclick="renderPuanlamaSecim()">Puanlama Modülü</button>
+                <button class="btn" style="padding:18px;" onclick="sifreliModulKontrol('ogrenci')">Öğrenci Yönetimi 🔒</button>
+                <button class="btn" style="padding:18px;" onclick="sifreliModulKontrol('turnuva')">Turnuva Ağacı 🔒</button>
+                <button class="btn" style="padding:12px; background:transparent; border-color:var(--border-color); margin-top:30px; font-size:14px; color:var(--text-muted);" onclick="renderHakkinda()">ℹ️ Uygulama Hakkında</button>
+            </div>`;
+    }
+
+    function renderHakkinda() {
+        document.getElementById('app').innerHTML = `
+            <div class="card" style="text-align:center;">
+                <h2>Uygulama Hakkında</h2>
+                <div style="font-size:15px; color:var(--text-muted); margin-bottom:20px; line-height:1.6;">
+                    Bu yazılım, münazara turnuvalarının jüri değerlendirmelerini, puan tutanaklarını ve eleme ağaçlarını dijital, güvenli ve gerçek zamanlı olarak yönetmek amacıyla geliştirilmiştir.
+                </div>
+                <div class="about-team-list">
+                    <div style="font-size:12px; text-transform:uppercase; color:var(--accent); font-weight:bold; letter-spacing:1px; margin-bottom:12px; text-align:center;">Developed and Written by</div>
+                    <div class="about-team-item">💻 Muhammed Fatih TURAN</div>
+                    <div class="about-team-item">💻 Ali GENÇ</div>
+                    <div class="about-team-item">💻 Sümeyye AZİTİ</div>
+                    <div class="about-team-item">💻 Onur GÜLTEKİN</div>
+                    <div class="about-team-item">💻 Taylan GÜL</div>
+                </div>
+                <div style="font-size:13px; color:var(--text-muted); margin-top:15px;">
+                    Iğdır Millî Eğitim Müdürlüğü AR-GE Birimi Projesidir.
+                </div>
+                <button class="btn" style="background:#475569; margin-top:25px;" onclick="anaMenu()">← Ana Menüye Dön</button>
+            </div>`;
+    }
+
+    function LogSifre(metin) {
+        return btoa(metin);
+    }
+
+    function sifreliModulKontrol(modulId) {
+        if (sessionStorage.getItem("adminGiris") === "onayli") {
+            if(modulId === 'ogrenci') return renderOgrenci();
+            if(modulId === 'turnuva') return renderTurnuva();
+        }
+
+        let girdi = prompt("Bu alana erişmek için yetkili şifresini giriniz:");
+        if (girdi !== null) {
+            let temizGirdi = girdi.trim(); 
+            let hashliGirdi = LogSifre(temizGirdi);
+            
+            if (hashliGirdi === kSifre) {
+                sessionStorage.setItem("adminGiris", "onayli");
+                if(modulId === 'ogrenci') renderOgrenci();
+                if(modulId === 'turnuva') renderTurnuva();
+            } else {
+                alert("Hatalı şifre! Erişim reddedildi.");
+            }
+        }
+    }
+
+    // --- PUANLAMA MODÜLÜ ---
+    function renderPuanlamaSecim() {
+        verilenPuanlar = {};
+        
+        document.getElementById('app').innerHTML = `
+            <div class="card">
+                <h2>Puanlama Modülü</h2>
+                <div class="btn-grid" style="grid-template-columns: 1fr 1fr; margin-bottom:20px;">
+                    <button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this, 'ORTAOKUL', 'puanlama')">ORTAOKUL MÜNAZARASI</button>
+                    <button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this, 'LİSE', 'puanlama')">LİSE MÜNAZARASI</button>
+                </div>
+                
+                <select id="hukOkul" onchange="macOkulDegisti('hukOkul')"><option value="">Hükümet Okul Seçiniz</option></select>
+                <select id="muhOkul" onchange="macOkulDegisti('muhOkul')"><option value="">Muhalefet Okul Seçiniz</option></select>
+                
+                <div class="btn-grid" style="grid-template-columns: 1fr 1fr; margin-top:15px;">
+                    <button class="btn taraf-btn ${secimler.taraf==='HÜKÜMET'?'btn-active':''}" style="border-left: 4px solid var(--hukumet);" onclick="tekSecim(this, 'taraf', 'taraf-btn')">HÜKÜMET</button>
+                    <button class="btn taraf-btn ${secimler.taraf==='MUHALEFET'?'btn-active':''}" style="border-left: 4px solid var(--muhalefet);" onclick="tekSecim(this, 'taraf', 'taraf-btn')">MUHALEFET</button>
+                </div>
+
+                <div class="btn-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+                    <button class="btn juri-btn ${secimler.juri==='1. Jüri'?'btn-active':''}" onclick="tekSecim(this, 'juri', 'juri-btn')">1. Jüri</button>
+                    <button class="btn juri-btn ${secimler.juri==='2. Jüri'?'btn-active':''}" onclick="tekSecim(this, 'juri', 'juri-btn')">2. Jüri</button>
+                    <button class="btn juri-btn ${secimler.juri==='3. Jüri'?'btn-active':''}" onclick="tekSecim(this, 'juri', 'juri-btn')">3. Jüri</button>
+                </div>
+
+                <div class="btn-grid" style="grid-template-columns: 1fr 1fr;" id="ogrenciButonAlani">
+                    <div style="grid-column: span 2; text-align:center; padding:20px; color:var(--text-muted); font-style:italic;">Önce okulları belirleyip Taraf butonuna basınız.</div>
+                </div>
+
+                <button class="btn" style="background:var(--primary); border:none; margin-top:25px; font-size:16px; padding:16px;" onclick="puanlamaSayfasinaGec()">Kriterleri Puanla →</button>
+                <button class="btn" style="background:var(--success); border:none;" onclick="sifreliRaporKontrol()">📊 Sonuçları Gör</button>
+                <button class="btn" style="background:#475569" onclick="anaMenu()">← Ana Menü</button>
+            </div>`;
+
+        db.ref('okullar/' + secimler.kategori).once('value', (s) => {
+            let hSelect = document.getElementById('hukOkul');
+            let mSelect = document.getElementById('muhOkul');
+            s.forEach(o => {
+                hSelect.innerHTML += `<option value="${o.key}">${o.key}</option>`;
+                mSelect.innerHTML += `<option value="${o.key}">${o.key}</option>`;
+            });
+            
+            if(secimler.hukOkul) hSelect.value = secimler.hukOkul;
+            if(secimler.muhOkul) mSelect.value = secimler.muhOkul;
+            
+            if(secimler.taraf) ogrencileriYukle();
+        });
+    }
+
+    function macOkulDegisti(tip) {
+        secimler[tip] = document.getElementById(tip).value;
+        localStorage.setItem('aktifMacSecimleri', JSON.stringify(secimler));
+        if(secimler.taraf) ogrencileriYukle();
+    }
+
+    function katSec(btn, kategori, modül) {
+        secimler.kategori = kategori;
+        secimler.hukOkul = '';
+        secimler.muhOkul = '';
+        secimler.taraf = '';
+        secimler.ogr = '';
+        secimler.okul = '';
+        localStorage.setItem('aktifMacSecimleri', JSON.stringify(secimler));
+
+        if(modül === 'puanlama') renderPuanlamaSecim();
+        if(modül === 'ogrenci') renderOgrenci();
+        if(modül === 'turnuva') renderTurnuva();
+    }
+
+    function ogrencileriYukle() {
+        let hVal = document.getElementById('hukOkul').value;
+        let mVal = document.getElementById('muhOkul').value;
+        
+        if(!secimler.taraf) return;
+        
+        let seciliOkulAd = secimler.taraf === "HÜKÜMET" ? hVal : mVal;
+        secimler.okul = seciliOkulAd;
+        localStorage.setItem('aktifMacSecimleri', JSON.stringify(secimler));
+        
+        let alan = document.getElementById('ogrenciButonAlani');
+        if(!seciliOkulAd) { alan.innerHTML = '<div style="grid-column: span 2; text-align:center; color:var(--text-muted); font-style:italic;">Seçilen tarafa ait okul belirlenmemiş!</div>'; return; }
+        
+        alan.innerHTML = '<div style="grid-column: span 2; text-align:center;">Öğrenciler getiriliyor...</div>';
+        db.ref('okullar/' + secimler.kategori + '/' + seciliOkulAd).once('value', (s) => {
+            alan.innerHTML = "";
+            let sayac = 1;
+            s.forEach(o => {
+                let rRol = sayac <= 3 ? sayac + '. Konuşmacı' : 'Grup Sözcüsü';
+                let btnText = `${o.val()} (${rRol})`;
+                let activeClass = secimler.ogr === btnText ? 'btn-active' : '';
+                alan.innerHTML += `<button class="btn ogr-btn ${activeClass}" onclick="tekSecim(this, 'ogr', 'ogr-btn')">${btnText}</button>`;
+                sayac++;
+            });
+        });
+    }
+
+    function tekSecim(element, tip, sinif) {
+        document.querySelectorAll('.' + sinif).forEach(b => b.classList.remove('btn-active'));
+        element.classList.add('btn-active');
+        secimler[tip] = element.innerText;
+        localStorage.setItem('aktifMacSecimleri', JSON.stringify(secimler));
+        if(tip === 'taraf') { ogrencileriYukle(); }
+    }
+
+    function puanlamaSayfasinaGec() {
+        if(!secimler.taraf || !secimler.juri || !secimler.ogr || !secimler.okul) return alert("Lütfen seçimleri eksiksiz yapın!");
+        verilenPuanlar = {};
+
+        let html = `<div class="card"><h2>Puanlama Tablosu: ${secimler.ogr}</h2>
+                    <div style="font-size:14px; color:var(--text-muted); margin-bottom:20px;">Kategori: <b>${secimler.kategori}</b> | Okul: <b>${secimler.okul}</b> | Değerlendiren: <b>${secimler.juri}</b></div>
+                    <div id="kriterListesi"></div>
+                    <button class="btn" style="background:var(--success); border:none; margin-top:25px; padding:16px; font-size:16px;" onclick="puanlariGonder()">Puanları Gönder ✓</button>
+                    <button class="btn" style="background:#475569" onclick="renderPuanlamaSecim()">← Geri Dön</button></div>`;
+        document.getElementById('app').innerHTML = html;
+
+        let list = document.getElementById('kriterListesi');
+        krit.forEach((k, i) => {
+            let d = document.createElement('div'); d.className = 'kriter-card';
+            let kutular = "";
+            for(let n=1; n<=k.m; n++) {
+                kutular += `<div class="puan-btn" onclick="puanSec(this, ${i}, ${n})">${n}</div>`;
+            }
+            d.innerHTML = `<span class="kriter-label">${i+1}. ${k.t} <span style="color:var(--text-muted); font-weight:normal;">(Maks: ${k.m})</span></span><div class="puan-row">${kutular}</div>`;
+            list.appendChild(d);
+        });
+    }
+
+    function puanSec(element, kriterIndex, puan) {
+        element.parentElement.querySelectorAll('.puan-btn').forEach(x => x.classList.remove('selected'));
+        element.classList.add('selected');
+        verilenPuanlar[kriterIndex] = puan;
+    }
+
+    function puanlariGonder() {
+        if(Object.keys(verilenPuanlar).length < 13) return alert("Lütfen tüm 13 kriteri puanlayın!");
+        let macKimligi = (secimler.hukOkul && secimler.muhOkul) ? `${secimler.hukOkul}-vs-${secimler.muhOkul}` : "Genel";
+
+        db.ref('puanlar/' + secimler.kategori).push({
+            secim: secimler,
+            puanlar: verilenPuanlar,
+            mac: macKimligi
+        }).then(() => { 
+            alert("Puanlar başarıyla buluta gönderildi!"); 
+            turnuvaAgacinaPuanYansit(secimler.kategori, secimler.hukOkul, secimler.muhOkul);
+            secimler.ogr = '';
+            localStorage.setItem('aktifMacSecimleri', JSON.stringify(secimler));
+            renderPuanlamaSecim(); 
+        });
+    }
+
+    function turnuvaAgacinaPuanYansit(kat, hukOkul, muhOkul) {
+        if(!hukOkul || !muhOkul) return;
+        let hafizaAnahtari = 'turnuvaData_' + kat;
+        let localData = JSON.parse(localStorage.getItem(hafizaAnahtari));
+        if(!localData) return;
+
+        db.ref('puanlar/' + kat).once('value', (s) => {
+            let tHuk = 0, tMuh = 0;
+            s.forEach(c => {
+                let v = c.val();
+                if(v.mac === `${hukOkul}-vs-${muhOkul}`) {
+                    let toplam = Object.values(v.puanlar).reduce((a,b)=>a+b,0);
+                    if(v.secim.okul === hukOkul) tHuk += toplam;
+                    if(v.secim.okul === muhOkul) tMuh += toplam;
+                }
+            });
+
+            let hInput = null, mInput = null, mIdx = null;
+            let boxes = document.querySelectorAll(`[id^="box-${localData.turSayaci}-"]`);
+            boxes.forEach(box => {
+                let bText = box.innerText;
+                if(bText.includes(hukOkul) && bText.includes(muhOkul)) {
+                    mIdx = box.id.split('-').pop();
+                    hInput = document.getElementById(`skor-${localData.turSayaci}-${mIdx}-1`);
+                    mInput = document.getElementById(`skor-${localData.turSayaci}-${mIdx}-2`);
+                }
+            });
+
+            if(hInput && mInput) {
+                hInput.value = tHuk;
+                mInput.value = tMuh;
+                
+                localData.kazananlarMap[mIdx + "_s1"] = tHuk;
+                localData.kazananlarMap[mIdx + "_s2"] = tMuh;
+
+                let statusDiv = document.getElementById(`status-${localData.turSayaci}-${mIdx}`);
+                if (tHuk > tMuh) {
+                    localData.kazananlarMap[mIdx] = hukOkul;
+                    if(statusDiv) statusDiv.innerHTML = `<div class="win-tag">Kazanan: ${hukOkul}</div>`;
+                } else if (tMuh > tHuk) {
+                    localData.kazananlarMap[mIdx] = muhOkul;
+                    if(statusDiv) statusDiv.innerHTML = `<div class="win-tag">Kazanan: ${muhOkul}</div>`;
+                }
+                
+                localData.aktifHtml = document.getElementById('aktif-tur-container').innerHTML;
+                localStorage.setItem(hafizaAnahtari, JSON.stringify(localData));
+                kontrolEtVeButonGoster();
+            }
+        });
+    }
+
+    function sifreliRaporKontrol() {
+        if (sessionStorage.getItem("adminGiris") === "onayli") {
+            return showReport();
+        }
+        let girdi = prompt("Şifre giriniz:");
+        if (girdi !== null) {
+            let hashliGirdi = LogSifre(girdi.trim());
+            if (hashliGirdi === kSifre) {
+                sessionStorage.setItem("adminGiris", "onayli");
+                showReport();
+            } else alert("Hatalı şifre! Erişim reddedildi.");
+        }
+    }
+
+    function showReport() {
+        document.getElementById('app').innerHTML = `
+            <div class="card" style="max-width:1000px;">
+                <h2>Münazara Sonuç Tutanak (${secimler.kategori})</h2>
+                
+                <div class="report-summary-grid">
+                    <div>
+                        <h4 style="margin-bottom:8px; color:var(--text-muted);">🏆 En İyi Konuşmacılar (MVP)</h4>
+                        <div id="mvp-podium" class="mvp-box">Hesaplanıyor...</div>
+                    </div>
+                    <div>
+                        <h4 style="margin-bottom:8px; color:var(--text-muted);">🏫 Okulların Toplam Puanları</h4>
+                        <div id="school-leaderboard" class="school-total-box">Hesaplanıyor...</div>
+                    </div>
+                </div>
+
+                <select id="macFiltre" style="margin-bottom:20px;" class="no-print" onchange="tutanakTablosuDoldur()"><option value="hepsi">Tüm Maçların Genel Raporu</option></select>
+                <div id="rapor-tablosu" style="overflow-x:auto;">Veriler derleniyor...</div>
+                
+                <div style="display:flex; justify-content:space-between; margin-top:80px;">
+                    <div style="border-top:1px solid #000; width:25%; text-align:center; padding-top:8px; color:var(--text-muted);">1. Jüri İmza</div>
+                    <div style="border-top:1px solid #000; width:25%; text-align:center; padding-top:8px; color:var(--text-muted);">2. Jüri İmza</div>
+                    <div style="border-top:1px solid #000; width:25%; text-align:center; padding-top:8px; color:var(--text-muted);">3. Jüri İmza</div>
+                </div>
+                <button class="btn no-print" style="background:var(--primary); border:none; margin-top:30px;" onclick="window.print()">🖨️ Yazdır / PDF Al</button>
+                <button class="btn no-print" style="background:#475569;" onclick="renderPuanlamaSecim()">Kapat</button>
+            </div>`;
+
+        db.ref('puanlar/' + secimler.kategori).once('value', (s) => {
+            let filtre = document.getElementById('macFiltre');
+            let mSet = new Set();
+            let ogrenciPuanlari = {};
+            let okulPuanlari = {};
+
+            s.forEach(c => { 
+                let v = c.val();
+                if(v.mac) mSet.add(v.mac); 
+                
+                let toplamPuan = Object.values(v.puanlar).reduce((a,b)=>a+b,0);
+
+                if(v.secim && v.secim.ogr) {
+                    let temizIsim = v.secim.ogr.split(' (')[0] + " (" + v.secim.okul + ")";
+                    if(!ogrenciPuanlari[temizIsim]) ogrenciPuanlari[temizIsim] = { skor: 0, sayac: 0 };
+                    ogrenciPuanlari[temizIsim].skor += toplamPuan;
+                    ogrenciPuanlari[temizIsim].sayac += 1;
+                }
+
+                if(v.secim && v.secim.okul) {
+                    if(!okulPuanlari[v.secim.okul]) okulPuanlari[v.secim.okul] = 0;
+                    okulPuanlari[v.secim.okul] += toplamPuan;
+                }
+            });
+
+            if(filtre) { mSet.forEach(m => filtre.innerHTML += `<option value="${m}">${m.replace('-vs-', ' VS ')}</option>`); }
+            
+            let siralıList = Object.keys(ogrenciPuanlari).map(isim => {
+                return { isim: isim, ortalama: (ogrenciPuanlari[isim].skor / ogrenciPuanlari[isim].sayac).toFixed(1) };
+            }).sort((a,b) => b.ortalama - a.ortalama);
+
+            let podium = document.getElementById('mvp-podium');
+            if(siralıList.length > 0) {
+                podium.innerHTML = "";
+                for(let i=0; i<Math.min(3, siralıList.length); i++) {
+                    podium.innerHTML += `
+                        <div class="summary-row">
+                            <span class="summary-name">${siralıList[i].isim.split(' (')[0]}</span>
+                            <span class="summary-score">${siralıList[i].ortalama} Ort.</span>
+                        </div>`;
+                }
+            } else { podium.innerHTML = "Veri yok."; }
+
+            let siralıOkullar = Object.keys(okulPuanlari).map(oAd => {
+                return { isim: oAd, toplam: okulPuanlari[oAd] };
+            }).sort((a,b) => b.toplam - a.toplam);
+
+            let schoolBoard = document.getElementById('school-leaderboard');
+            if(siralıOkullar.length > 0) {
+                schoolBoard.innerHTML = "";
+                siralıOkullar.forEach((okulData, index) => {
+                    schoolBoard.innerHTML += `
+                        <div class="summary-row">
+                            <span class="summary-name">${index+1}. ${okulData.isim}</span>
+                            <span class="summary-score">${okulData.toplam} Puan</span>
+                        </div>`;
+                });
+            } else { schoolBoard.innerHTML = "Veri yok."; }
+
+            tutanakTablosuDoldur();
+        });
+    }
+
+    function tutanakTablosuDoldur() {
+        let fElement = document.getElementById('macFiltre');
+        let seciliMac = fElement ? fElement.value : "hepsi";
+        db.ref('puanlar/' + secimler.kategori).once('value', (s) => {
+            let html = '<table class="tutanak-table"><tr><th>Taraf</th><th>Okul</th><th>Öğrenci</th><th>Jüri</th>' + 
+                       krit.map(k => `<th>${k.t.substring(0,4)}.</th>`).join('') + '<th>TOPLAM</th></tr>';
+            s.forEach(c => { 
+                let v = c.val(); 
+                if(seciliMac !== "hepsi" && v.mac !== seciliMac) return;
+                let ps = Object.values(v.puanlar); 
+                let t = ps.reduce((a,b)=>a+b,0);
+                html += `<tr><td>${v.secim.taraf}</td><td>${v.secim.okul || '-'}</td><td>${v.secim.ogr.split(' (')[0]}</td><td>${v.secim.juri}</td>` + 
+                        ps.map(p => `<td>${p}</td>`).join('') + `<td><b style="color:var(--accent);">${t}</b></td></tr>`; 
+            });
+            document.getElementById('rapor-tablosu').innerHTML = html + '</table>';
+        });
+    }
+
+    // --- ÖĞRENCİ YÖNETİMİ & DOĞRUDAN EXCEL (.XLSX) YÜKLEME ---
+    function renderOgrenci() {
+        document.getElementById('app').innerHTML = `
+            <div class="card">
+                <h2>Okul ve Öğrenci Listeleri</h2>
+                <div class="btn-grid" style="grid-template-columns: 1fr 1fr; margin-bottom:20px;">
+                    <button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this, 'ORTAOKUL', 'ogrenci')">ORTAOKUL LİSTESİ</button>
+                    <button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this, 'LİSE', 'ogrenci')">LİSE LİSTESİ</button>
+                </div>
+
+                <div class="file-upload-wrapper">
+                    <div style="font-size:14px; font-weight:bold; margin-bottom:8px; color:var(--accent);">📁 Toplu Okul/Öğrenci Yükleme (.xlsx / .csv)</div>
+                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Sütunlar: <b>Okul Adı</b> ve <b>Öğrenci Ad Soyad</b>. Aktif Kategori: <b>${secimler.kategori}</b></div>
+                    <input type="file" id="excelDosya" accept=".xlsx, .xls, .csv" style="padding:5px; background:transparent; border:none;">
+                    <button class="btn" style="background:var(--success); border:none; margin-top:10px; padding:10px;" onclick="excelTopluYukle()">Dosyayı İşle ve Kaydet</button>
+                </div>
+
+                <div style="text-align:center; font-weight:bold; color:var(--text-muted); margin:15px 0;">Veya Tek Tek Ekle:</div>
+                <input type="text" id="okulAd" placeholder="Okul Adı">
+                <input type="text" id="ogrAd" placeholder="Öğrenci Ad Soyad">
+                <button class="btn" style="background:var(--primary); border:none;" onclick="ogrenciKaydet()">Öğrenci Kaydet</button>
+                
+                <div id="okulListesi" style="margin-top:25px;"></div>
+                <button class="btn" style="background:#475569" onclick="anaMenu()">← Ana Menü</button>
+            </div>`;
+            
+        okulListesiniYenile();
+    }
+
+    function firebaseKeyTemizle(isim) {
+        // Firebase yolunda hata verebilecek karakterleri (. # $ / [ ]) temizler
+        return String(isim).replace(/[\.\#\$\/\[\]]/g, '').trim();
+    }
+
+    function excelTopluYukle() {
+        let fileInput = document.getElementById('excelDosya');
+        if(!fileInput.files.length) return alert("Lütfen bir Excel (.xlsx) veya CSV dosyası seçin!");
+        
+        let file = fileInput.files[0];
+        let reader = new FileReader();
+
+        reader.onload = function(e) {
+            try {
+                let data = new Uint8Array(e.target.result);
+                let workbook = XLSX.read(data, { type: 'array' });
+                let firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                let rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+
+                let yuklemeSayisi = 0;
+                for (let i = 1; i < rows.length; i++) {
+                    let row = rows[i];
+                    if (!row || row.length === 0) continue;
+
+                    let schoolRaw = row[0] ? String(row[0]).trim() : '';
+                    let student = row[1] ? String(row[1]).trim() : '';
+                    let schoolName = firebaseKeyTemizle(schoolRaw);
+
+                    if (schoolName && student && schoolName !== "Okul Adı") {
+                        db.ref('okullar/' + secimler.kategori + '/' + schoolName).push(student);
+                        yuklemeSayisi++;
+                    }
+                }
+
+                if (yuklemeSayisi > 0) {
+                    alert(`${yuklemeSayisi} adet öğrenci (${secimler.kategori}) listesine başarıyla aktarıldı!`);
+                    fileInput.value = '';
+                    okulListesiniYenile();
+                } else {
+                    alert("Yüklenecek kayıt bulunamadı. Lütfen dosyadaki satırları kontrol edin.");
+                }
+            } catch (err) {
+                console.error(err);
+                alert("Dosya okunurken bir hata oluştu!");
+            }
+        };
+
+        reader.readAsArrayBuffer(file);
+    }
+
+    function okulListesiniYenile() {
+        db.ref('okullar/' + secimler.kategori).once('value', (s) => {
+            let l = document.getElementById('okulListesi'); 
+            if(!l) return;
+            l.innerHTML = "";
+            s.forEach((o) => {
+                l.innerHTML += `
+                    <div style="margin-bottom:10px;">
+                        <button class="btn" style="background:#1e293b; text-align:left; border-left: 4px solid var(--primary); margin:0;" onclick="togg('${o.key}')">🏫 ${o.key}</button>
+                        <div id="list-${o.key}" style="display:none; padding:12px; background:#111827; border:1px solid var(--border-color); border-radius:0 0 10px 10px;"></div>
+                    </div>`;
+            });
+        });
+    }
+
+    function ogrenciKaydet() {
+        let school = document.getElementById('okulAd').value.trim();
+        let student = document.getElementById('ogrAd').value.trim();
+        if(!school || !student) return alert("Lütfen alanları boş bırakmayın!");
+        
+        let temizOkul = firebaseKeyTemizle(school);
+        db.ref('okullar/' + secimler.kategori + '/' + temizOkul).push(student).then(() => {
+            alert("Öğrenci başarıyla veritabanına kaydedildi!");
+            document.getElementById('ogrAd').value = ""; 
+            okulListesiniYenile();
+        });
+    }
+
+    function togg(o) {
+        let d = document.getElementById('list-'+o); 
+        if(!d) return;
+        let durum = d.style.display;
+        
+        document.querySelectorAll('[id^="list-"]').forEach(el => el.style.display = 'none');
+        
+        if(durum === 'none') {
+            d.style.display = 'block';
+            ogrenciListesiniDoldur(o, d);
+        }
+    }
+
+    function ogrenciListesiniDoldur(o, divElement) {
+        db.ref('okullar/' + secimler.kategori + '/' + o).once('value', (s) => {
+            divElement.innerHTML = ""; 
+            s.forEach(ogr => {
+                divElement.innerHTML += `
+                    <div style="padding:6px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #1f2937;">
+                        <span>👤 ${ogr.val()}</span> 
+                        <button style="background:#ef4444; color:white; border:none; border-radius:6px; padding:4px 12px; cursor:pointer; font-weight:bold;" onclick="ogrenciSil('${o}', '${ogr.key}')">Sil</button>
+                    </div>`;
+            });
+            divElement.innerHTML += `
+                <button class="btn" style="background:#b91c1c; border:none; margin-top:12px; font-size:13px; padding:8px;" onclick="okulKompleSil('${o}')">❌ Okulu ve Tüm Öğrencileri Sil</button>
+            `;
+        });
+    }
+
+    function ogrenciSil(okulAd, ogrKey) {
+        if(confirm("Bu öğrenciyi silmek istediğinize emin misiniz?")) {
+            db.ref(`okullar/${secimler.kategori}/${okulAd}/${ogrKey}`).remove().then(() => {
+                let d = document.getElementById('list-'+okulAd);
+                ogrenciListesiniDoldur(okulAd, d);
+            });
+        }
+    }
+
+    function okulKompleSil(okulAd) {
+        if(confirm(`${okulAd} okulunu ve tüm öğrencilerini listeden tamamen silmek istediğinize emin misiniz?`)) {
+            db.ref(`okullar/${secimler.kategori}/${okulAd}`).remove().then(() => {
+                alert("Okul tamamen temizlendi.");
+                okulListesiniYenile();
+            });
+        }
+    }
+
+    // --- TURNUVA AĞACI ---
+    function renderTurnuva() {
+        document.getElementById('app').innerHTML = `
+            <div class="card">
+                <h2>Turnuva Ağacı Finalleri</h2>
+                <div class="btn-grid" style="grid-template-columns: 1fr 1fr; margin-bottom:20px;">
+                    <button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this, 'ORTAOKUL', 'turnuva')">ORTAOKUL AĞACI</button>
+                    <button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this, 'LİSE', 'turnuva')">LİSE AĞACI</button>
+                </div>
+                
+                <div style="margin-bottom:15px; font-size:14px; color:var(--text-muted);">
+                    💡 <b>Mevcut Okul Durumu:</b> Öğrenci listesine eklediğiniz okullar aşağıda listelenmiştir. "Turnuvayı Başlat" dediğinizde sistem bunları otomatik <b>rastgele eşleştirecektir</b>.
+                </div>
+                <textarea id="takimlar" style="height:100px;" placeholder="Sistemde kayıtlı okul aranıyor..." readonly></textarea>
+                
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <button class="btn" style="background:var(--primary); border:none;" onclick="ilkTuruKur()">🎲 Turnuvayı Başlat (Rastgele Eşleştir)</button>
+                    <button class="btn" style="background:#ef4444; border:none;" onclick="turnuvayiSifirla()">Turnuvayı Sıfırlat</button>
+                </div>
+                <div id="sampiyonAlani"></div>
+                <div id="aktif-tur-container"></div>
+                <button class="btn" id="nextTurBtn" style="display:none; background:var(--success); border:none; margin-top:25px; padding:16px;" onclick="yeniTur()">Kalanlarla Üst Turu Kur</button>
+                <div id="gecmis-turlar"></div>
+                <button class="btn" style="background:#475569" onclick="anaMenu()">← Ana Menü</button>
+            </div>`;
+        
+        let hafizaAnahtari = 'turnuvaData_' + secimler.kategori;
+        let localData = JSON.parse(localStorage.getItem(hafizaAnahtari)) || { kazananlarMap: {}, toplamMacSayisi: 0, turSayaci: 1, aktifHtml: "", gecmisHtml: "", sampiyonHtml: "", takimlarMetni: "" };
+        
+        db.ref('okullar/' + secimler.kategori).once('value', (s) => {
+            let okullarDizisi = [];
+            s.forEach(o => { okullarDizisi.push(o.key); });
+            let metin = okullarDizisi.join('\n');
+            
+            if(!localData.aktifHtml) {
+                document.getElementById('takimlar').value = metin;
+                localData.takimlarMetni = metin;
+                hafizayaKaydet(localData);
+            } else {
+                document.getElementById('takimlar').value = localData.takimlarMetni || metin;
+            }
+        });
+        
+        if(localData.aktifHtml) {
+            document.getElementById('aktif-tur-container').innerHTML = localData.aktifHtml;
+            document.getElementById('gecmis-turlar').innerHTML = localData.gecmisHtml;
+            document.getElementById('sampiyonAlani').innerHTML = localData.sampiyonHtml;
+            
+            Object.keys(localData.kazananlarMap).forEach(key => {
+                let s1 = localData.kazananlarMap[key + "_s1"];
+                let s2 = localData.kazananlarMap[key + "_s2"];
+                let i1 = document.getElementById(`skor-${localData.turSayaci}-${key}-1`);
+                let i2 = document.getElementById(`skor-${localData.turSayaci}-${key}-2`);
+                if(i1 && s1 !== undefined) i1.value = s1;
+                if(i2 && s2 !== undefined) i2.value = s2;
+            });
+        }
+    }
+
+    function turnuvayiSifirla() {
+        if(confirm(secimler.kategori + " turnuva ilerlemesini tamamen silmek istediğinize emin misiniz?")) {
+            localStorage.removeItem('turnuvaData_' + secimler.kategori);
+            renderTurnuva();
+        }
+    }
+
+    function hafizayaKaydet(dataObj) {
+        localStorage.setItem('turnuvaData_' + secimler.kategori, JSON.stringify(dataObj));
+    }
+
+    function ilkTuruKur() {
+        let t = document.getElementById('takimlar').value.split('\n').filter(x => x.trim());
+        if(t.length < 2) return alert("Turnuvayı başlatmak için sistemde en az 2 okul bulunmalıdır!");
+        
+        t.sort(() => Math.random() - 0.5);
+        
+        let localData = { kazananlarMap: {}, toplamMacSayisi: 0, turSayaci: 1, aktifHtml: "", gecmisHtml: "", sampiyonHtml: "", takimlarMetni: t.join('\n') };
+        hafizayaKaydet(localData);
+        turKur(t, localData);
+    }
+
+    function turKur(takimListesi, localData) {
+        localData.toplamMacSayisi = 0;
+        let cont = document.getElementById('aktif-tur-container');
+        if(!cont) return;
+        cont.innerHTML = `<h3 style="color:var(--text-main); font-size:20px; border-left:4px solid var(--accent); padding-left:8px;">Aktif Tur: ${localData.turSayaci}. Eleme Eşleşmeleri</h3>`;
+        
+        for(let i=0; i<takimListesi.length; i+=2) {
+            let t1 = takimListesi[i] || 'BYE', t2 = takimListesi[i+1] || 'BYE';
+            localData.toplamMacSayisi++;
+            
+            if(t2 === 'BYE') {
+                cont.innerHTML += `<div class="match-box" style="border-color:var(--success);"><b style="color:var(--success);">${t1}</b> <br><span style="color:var(--text-muted); font-size:12px;">vs</span><br> <b>${t2}</b><br><div class="win-tag">Otomatik Tur Atladı</div></div>`;
+                localData.kazananlarMap[i] = t1;
+            } else {
+                cont.innerHTML += `
+                    <div class="match-box" id="box-${localData.turSayaci}-${i}">
+                        <div class="match-team" style="border-bottom: 1px solid #1f2937; padding-bottom:6px;">
+                            <span><b>${t1}</b></span> <input type="number" class="skor-input" placeholder="0" id="skor-${localData.turSayaci}-${i}-1" oninput="otomatikSkorKontrol('${t1}', '${t2}', ${i})">
+                        </div>
+                        <div style="text-align:center; margin: 4px 0; font-size:11px; color:var(--text-muted); font-weight:bold; letter-spacing:1px;">VS</div>
+                        <div class="match-team" style="border-top: 1px solid #1f2937; padding-top:6px;">
+                            <span><b>${t2}</b></span> <input type="number" class="skor-input" placeholder="0" id="skor-${localData.turSayaci}-${i}-2" oninput="otomatikSkorKontrol('${t1}', '${t2}', ${i})">
+                        </div>
+                        <div id="status-${localData.turSayaci}-${i}"></div>
+                    </div>`;
+            }
+        }
+        hafizayaKaydet(localData);
+        kontrolEtVeButonGoster();
+    }
+
+    function otomatikSkorKontrol(t1, t2, index) {
+        let hafizaAnahtari = 'turnuvaData_' + secimler.kategori;
+        let localData = JSON.parse(localStorage.getItem(hafizaAnahtari));
+        
+        let s1 = parseFloat(document.getElementById(`skor-${localData.turSayaci}-${index}-1`).value);
+        let s2 = parseFloat(document.getElementById(`skor-${localData.turSayaci}-${index}-2`).value);
+        let statusDiv = document.getElementById(`status-${localData.turSayaci}-${index}`);
+
+        if (isNaN(s1) || isNaN(s2)) {
+            delete localData.kazananlarMap[index];
+            delete localData.kazananlarMap[index + "_s1"];
+            delete localData.kazananlarMap[index + "_s2"];
+            if(statusDiv) statusDiv.innerHTML = "";
+            hafizayaKaydet(localData);
+            kontrolEtVeButonGoster();
+            return;
+        }
+
+        localData.kazananlarMap[index + "_s1"] = s1;
+        localData.kazananlarMap[index + "_s2"] = s2;
+
+        if (s1 > s2) {
+            localData.kazananlarMap[index] = t1;
+            if(statusDiv) statusDiv.innerHTML = `<div class="win-tag">Kazanan: ${t1}</div>`;
+        } else if (s2 > s1) {
+            localData.kazananlarMap[index] = t2;
+            if(statusDiv) statusDiv.innerHTML = `<div class="win-tag">Kazanan: ${t2}</div>`;
+        } else {
+            delete localData.kazananlarMap[index];
+            if(statusDiv) statusDiv.innerHTML = `<div class="win-tag" style="background:#475569; color:#cbd5e1; border-color:#475569;">Beraberlik</div>`;
+        }
+        hafizayaKaydet(localData);
+        kontrolEtVeButonGoster();
+    }
+
+    function kontrolEtVeButonGoster() {
+        let hafizaAnahtari = 'turnuvaData_' + secimler.kategori;
+        let localData = JSON.parse(localStorage.getItem(hafizaAnahtari));
+        if(!localData) return;
+
+        let filtrelenmisKazananlar = Object.keys(localData.kazananlarMap).filter(k => !k.includes("_")).map(k => localData.kazananlarMap[k]);
+        
+        if(filtrelenmisKazananlar.length >= localData.toplamMacSayisi) {
+            if(filtrelenmisKazananlar.length === 1) {
+                document.getElementById('sampiyonAlani').innerHTML = `<div class="champ-card">🏆 ${secimler.kategori} ŞAMPİYONU: ${filtrelenmisKazananlar[0]} 🏆</div>`;
+                document.getElementById('nextTurBtn').style.display = 'none';
+            } else {
+                document.getElementById('nextTurBtn').style.display = 'block';
+            }
+        } else {
+            document.getElementById('nextTurBtn').style.display = 'none';
+            document.getElementById('sampiyonAlani').innerHTML = "";
+        }
+        
+        localData.aktifHtml = document.getElementById('aktif-tur-container').innerHTML;
+        localData.gecmisHtml = document.getElementById('gecmis-turlar').innerHTML;
+        localData.sampiyonHtml = document.getElementById('sampiyonAlani').innerHTML;
+        localStorage.setItem(hafizaAnahtari, JSON.stringify(localData));
+    }
+
+    function yeniTur() {
+        let hafizaAnahtari = 'turnuvaData_' + secimler.kategori;
+        let localData = JSON.parse(localStorage.getItem(hafizaAnahtari));
+        
+        let gecmisCont = document.getElementById('gecmis-turlar');
+        let matchBoxes = document.getElementById('aktif-tur-container').querySelectorAll('.match-box');
+        let arsivHtml = `<h4 style="color:var(--text-muted); margin-bottom:10px;">${localData.turSayaci}. Tur Sonuç Arşivi</h4>`;
+        
+        matchBoxes.forEach(box => {
+            let inputs = box.querySelectorAll('input');
+            if(inputs.length === 2) {
+                let takım1 = box.querySelectorAll('b')[0].innerText;
+                let takım2 = box.querySelectorAll('b')[1].innerText;
+                let skor1 = inputs[0].value || '0';
+                let skor2 = inputs[1].value || '0';
+                let kazananIsim = parseFloat(skor1) > parseFloat(skor2) ? takım1 : takım2;
+                arsivHtml += `<div class="match-box" style="opacity:0.6; border-color:var(--border-color); background:#0f172a;">
+                                <div style="font-size:13px;">${takım1} <span style="color:var(--accent);">(${skor1})</span></div>
+                                <div style="font-size:13px;">${takım2} <span style="color:var(--accent);">(${skor2})</span></div>
+                                <div style="font-size:11px; color:var(--success); margin-top:5px; font-weight:bold;">→ Üst Tura Çıktı: ${kazananIsim}</div>
+                              </div>`;
+            } else {
+                arsivHtml += box.outerHTML;
+            }
+        });
+
+        gecmisCont.innerHTML = `<div class="old-tur">${arsivHtml}</div>` + gecmisCont.innerHTML;
+
+        let sonrakiTurTakimlari = Object.keys(localData.kazananlarMap).filter(k => !k.includes("_")).map(k => localData.kazananlarMap[k]);
+        
+        localData.kazananlarMap = {}; 
+        localData.turSayaci++;
+        document.getElementById('nextTurBtn').style.display = 'none';
+        
+        localStorage.setItem(hafizaAnahtari, JSON.stringify(localData));
+        turKur(sonrakiTurTakimlari, localData);
+    }
+
+    window.onload = function() {
+        anaMenu();
+    };
+</script>
+</body>
+</html>
