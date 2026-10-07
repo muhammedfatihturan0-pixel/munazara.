@@ -85,6 +85,12 @@
 
         @media (max-width:700px) { .admin-summary-grid { grid-template-columns:1fr 1fr; } }
         @media print { .no-print { display: none !important; } body { background: white; color: black; padding-bottom: 0; } .card { border: none; box-shadow: none; padding: 0; max-width: 100%; } .tutanak-table td, .tutanak-table th { border: 1px solid #000; color: #000; background: #fff !important; } .report-summary-grid { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 15px !important; } .arge-footer { position: relative; margin-top: 50px; bottom: 0; color: #000 !important; opacity: 1; font-weight: bold; } }
+
+        .system-status { position: fixed; top: 10px; right: 10px; z-index: 9999; background: rgba(15,23,42,.94); border: 1px solid var(--border-color); border-radius: 999px; padding: 7px 11px; font-size: 11px; color: var(--text-muted); box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+        .status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:1px; }
+        .status-dot.online { background:#10b981; }
+        .status-dot.offline { background:#ef4444; }
+        button:disabled { opacity:.45; cursor:not-allowed; transform:none !important; }
     </style>
 </head>
 <body>
@@ -96,6 +102,7 @@
 </div>
 
 <script>
+    const APP_VERSION = '3.0';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -104,64 +111,32 @@
         {t:"Konuşma İyi Planlanmış mı?", m:10}, {t:"Konuşma Esnasında Konu Bütünlüğü Sağlanıyor mu?", m:5}
     ];
 
-    let aktifMacSecimleri = JSON.parse(localStorage.getItem('aktifMacSecimleri')) || {
-        kategori: 'ORTAOKUL',
-        hukOkul: '',
-        muhOkul: '',
-        taraf: '',
-        juri: '',
-        ogr: '',
-        okul: ''
-    };
+    const BEKLENEN_JURILER = ['1. Jüri', '2. Jüri', '3. Jüri'];
+    const kSifre = "MTk5Mg==";
+    const JURI_OTURUM_KEY = 'munazaraJuriOturumuV3';
+    const OFFLINE_QUEUE_KEY = 'munazaraOfflineQueueV3';
+    const CLIENT_ID_KEY = 'munazaraClientIdV1';
+    const TURN_CACHE_PREFIX = 'turnuvaCacheV3_';
 
+    let aktifMacSecimleri = JSON.parse(localStorage.getItem('aktifMacSecimleri')) || {
+        kategori: 'ORTAOKUL', hukOkul: '', muhOkul: '', taraf: '', juri: '', juriAd: '', ogr: '', okul: '', macId: ''
+    };
     let secimler = { ...aktifMacSecimleri };
     let verilenPuanlar = {};
     let puanGonderiliyor = false;
     let sonRaporVerisi = null;
-    const BEKLENEN_JURILER = ['1. Jüri', '2. Jüri', '3. Jüri'];
-    const kSifre = "MTk5Mg=="; 
+    let firebaseBagli = false;
+    let aktifJuriListenerRef = null;
+    let aktifJuriMacListenerRef = null;
+    let aktifCanliPanelRefs = [];
+    let aktifTurnuvaRef = null;
 
-    function anaMenu() {
-        document.getElementById('app').innerHTML = `
-            <div class="card" style="text-align:center;">
-                <h2 style="border:none; margin-bottom:30px; font-size:28px; letter-spacing:0.5px;">MÜNAZARA KONTROL PANELİ</h2>
-                <button class="btn" style="padding:18px; background:var(--primary); border:none;" onclick="renderPuanlamaSecim()">Puanlama Modülü</button>
-                <button class="btn" style="padding:18px;" onclick="sifreliModulKontrol('ogrenci')">Öğrenci Yönetimi 🔒</button>
-                <button class="btn" style="padding:18px;" onclick="sifreliModulKontrol('turnuva')">Turnuva Ağacı 🔒</button>
-                <button class="btn" style="padding:12px; background:transparent; border-color:var(--border-color); margin-top:30px; font-size:14px; color:var(--text-muted);" onclick="renderHakkinda()">ℹ️ Uygulama Hakkında</button>
-            </div>`;
-    }
-
-    function renderHakkinda() {
-        document.getElementById('app').innerHTML = `
-            <div class="card" style="text-align:center;">
-                <h2>Uygulama Hakkında</h2>
-                <div style="font-size:15px; color:var(--text-muted); margin-bottom:20px; line-height:1.6;">
-                    Bu yazılım, münazara turnuvalarının jüri değerlendirmelerini, puan tutanaklarını ve eleme ağaçlarını dijital, güvenli ve gerçek zamanlı olarak yönetmek amacıyla geliştirilmiştir.
-                </div>
-                <div class="about-team-list">
-                    <div style="font-size:12px; text-transform:uppercase; color:var(--accent); font-weight:bold; letter-spacing:1px; margin-bottom:12px; text-align:center;">Developed and Written by</div>
-                    <div class="about-team-item">💻 Muhammed Fatih TURAN</div>
-                    <div class="about-team-item">💻 Ali GENÇ</div>
-                    <div class="about-team-item">💻 Sümeyye AZİTİ</div>
-                    <div class="about-team-item">💻 Onur GÜLTEKİN</div>
-                    <div class="about-team-item">💻 Taylan GÜL</div>
-                </div>
-                <div style="font-size:13px; color:var(--text-muted); margin-top:15px;">
-                    Iğdır Millî Eğitim Müdürlüğü AR-GE Birimi Projesidir.
-                </div>
-                <button class="btn" style="background:#475569; margin-top:25px;" onclick="anaMenu()">← Ana Menüye Dön</button>
-            </div>`;
-    }
-
-    function LogSifre(metin) {
-        return btoa(metin);
-    }
-
-    // Aynı maç + öğrenci + jüri kombinasyonu için tek aktif puan kaydı üretir.
-    // Böylece çift tıklama / tekrar gönderme toplamları şişirmez.
     function puanMetniNormalize(v) {
         return String(v ?? '').normalize('NFC').trim();
+    }
+
+    function htmlEscape(v) {
+        return String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
     }
 
     function hash32(str, seed=2166136261) {
@@ -173,10 +148,47 @@
         return (h >>> 0).toString(16).padStart(8, '0');
     }
 
-    function puanKayitKimligi(secimObj, mac) {
+    function getClientId() {
+        let id = localStorage.getItem(CLIENT_ID_KEY);
+        if (!id) {
+            id = 'c_' + hash32(String(Date.now()) + '|' + Math.random(), 2166136261) + hash32(navigator.userAgent || '', 3339675911);
+            localStorage.setItem(CLIENT_ID_KEY, id);
+        }
+        return id;
+    }
+
+    function macEtiketi(hukOkul, muhOkul) {
+        return `${puanMetniNormalize(hukOkul)} VS ${puanMetniNormalize(muhOkul)}`;
+    }
+
+    function macKimligiOlustur(kategori, hukOkul, muhOkul) {
+        const temel = [kategori, hukOkul, muhOkul].map(puanMetniNormalize).join('|').toLocaleLowerCase('tr-TR');
+        return 'm_' + hash32(temel, 2166136261) + hash32(temel, 3339675911);
+    }
+
+    function macEskiEtiketi(hukOkul, muhOkul) {
+        return `${hukOkul}-vs-${muhOkul}`;
+    }
+
+    function kayitMacId(v) {
+        if (v?.macId) return v.macId;
+        const s = v?.secim || {};
+        if (s.hukOkul && s.muhOkul) return macKimligiOlustur(s.kategori || v.kategori || '', s.hukOkul, s.muhOkul);
+        if (v?.mac) return 'legacy_' + hash32(String(v.mac).toLocaleLowerCase('tr-TR'));
+        return 'legacy_genel';
+    }
+
+    function kayitMacEtiketi(v) {
+        if (v?.macEtiketi) return v.macEtiketi;
+        const s = v?.secim || {};
+        if (s.hukOkul && s.muhOkul) return macEtiketi(s.hukOkul, s.muhOkul);
+        return String(v?.mac || 'Genel').replace('-vs-', ' VS ');
+    }
+
+    function puanKayitKimligi(secimObj, macId) {
         const s = secimObj || {};
         const temel = [
-            s.kategori, mac, s.okul, s.ogr, s.juri, s.taraf
+            s.kategori, macId, s.okul, s.ogr, s.juri, s.taraf
         ].map(puanMetniNormalize).join('|').toLocaleLowerCase('tr-TR');
         return 'p_' + hash32(temel, 2166136261) + hash32(temel, 3339675911);
     }
@@ -192,133 +204,369 @@
         snapshot.forEach(c => {
             const v = c.val();
             if (!v || !v.secim || !v.puanlar) return;
-            const dogalId = puanKayitKimligi(v.secim, v.mac || 'Genel');
-            // Firebase push anahtarları kronolojik sıralıdır; eski mükerrerlerde son görülen kayıt kazanır.
-            map.set(dogalId, { ...v, _firebaseKey: c.key, _dogalId: dogalId });
+            const mid = kayitMacId(v);
+            const dogalId = puanKayitKimligi(v.secim, mid);
+            map.set(dogalId, { ...v, macId: mid, macEtiketi: kayitMacEtiketi(v), _firebaseKey: c.key, _dogalId: dogalId });
         });
         return Array.from(map.values());
     }
 
     function ogrenciGrupKimligi(v) {
         const s = v.secim || {};
-        return [v.mac || 'Genel', s.okul || '', (s.ogr || '').split(' (')[0]].map(puanMetniNormalize).join('|');
+        return [kayitMacId(v), s.okul || '', (s.ogr || '').split(' (')[0]].map(puanMetniNormalize).join('|');
+    }
+
+    function secimleriKaydet() {
+        localStorage.setItem('aktifMacSecimleri', JSON.stringify(secimler));
+    }
+
+    function LogSifre(metin) {
+        return btoa(metin);
+    }
+
+    function adminSifreDogrula(mesaj='Yetkili şifresini giriniz:') {
+        const girdi = prompt(mesaj);
+        if (girdi === null) return false;
+        if (LogSifre(girdi.trim()) !== kSifre) {
+            alert('Hatalı şifre! Erişim reddedildi.');
+            return false;
+        }
+        sessionStorage.setItem('adminGiris', 'onayli');
+        return true;
+    }
+
+    function adminYetkiliMi() {
+        return sessionStorage.getItem('adminGiris') === 'onayli';
+    }
+
+    function juriOturumuGetir() {
+        try { return JSON.parse(localStorage.getItem(JURI_OTURUM_KEY) || 'null'); } catch (_) { return null; }
+    }
+
+    function juriOturumuKilitle(juri) {
+        const ad = prompt(`${juri} için jüri ad-soyadını giriniz:`);
+        if (ad === null) return;
+        const temizAd = puanMetniNormalize(ad);
+        if (!temizAd) return alert('Jüri adı boş bırakılamaz.');
+        const oturum = { juri, ad: temizAd, lockedAt: Date.now(), clientId: getClientId() };
+        localStorage.setItem(JURI_OTURUM_KEY, JSON.stringify(oturum));
+        secimler.juri = juri;
+        secimler.juriAd = temizAd;
+        secimleriKaydet();
+        renderPuanlamaSecim();
+    }
+
+    function juriOturumunuSifirla() {
+        if (!adminYetkiliMi() && !adminSifreDogrula('Jüri oturumunu değiştirmek için yetkili şifresini giriniz:')) return;
+        if (!confirm('Bu cihazdaki jüri oturumu kilidi kaldırılacak. Devam edilsin mi?')) return;
+        localStorage.removeItem(JURI_OTURUM_KEY);
+        secimler.juri = '';
+        secimler.juriAd = '';
+        secimleriKaydet();
+        renderPuanlamaSecim();
+    }
+
+    function offlineKuyrukGetir() {
+        try { return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '{}') || {}; } catch (_) { return {}; }
+    }
+
+    function offlineKuyrukKaydet(q) {
+        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(q));
+        networkDurumunuGuncelle();
+    }
+
+    function puaniKuyrugaEkle(item) {
+        const q = offlineKuyrukGetir();
+        const key = `${item.kategori}__${item.kayitId}`;
+        q[key] = { ...item, queuedAt: Date.now(), queueStatus: 'bekliyor' };
+        offlineKuyrukKaydet(q);
+    }
+
+    async function offlineKuyruguGonder() {
+        if (!navigator.onLine || !firebaseBagli) return;
+        const q = offlineKuyrukGetir();
+        const keys = Object.keys(q);
+        if (!keys.length) return;
+        let degisti = false;
+        for (const key of keys) {
+            const item = q[key];
+            try {
+                const mSnap = await db.ref(`maclar/${item.kategori}/${item.macId}`).once('value');
+                const m = mSnap.val();
+                if (m && m.durum === 'kapali') {
+                    q[key].queueStatus = 'mac_kapali';
+                    degisti = true;
+                    continue;
+                }
+                const rec = { ...item.kayit, serverSyncedAt: firebase.database.ServerValue.TIMESTAMP, offlineSynced: true };
+                await db.ref(`puanlar/${item.kategori}/${item.kayitId}`).set(rec);
+                delete q[key];
+                degisti = true;
+            } catch (err) {
+                console.warn('Offline kuyruk gönderilemedi:', err);
+                const code = String(err?.code || '').toLowerCase();
+                if (code.includes('permission')) q[key].queueStatus = 'yetki_hatasi';
+                else q[key].queueStatus = 'bekliyor';
+                degisti = true;
+                break;
+            }
+        }
+        if (degisti) offlineKuyrukKaydet(q);
+    }
+
+    function networkDurumunuGuncelle() {
+        let el = document.getElementById('systemStatusBadge');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'systemStatusBadge';
+            el.className = 'system-status';
+            document.body.appendChild(el);
+        }
+        const q = offlineKuyrukGetir();
+        const n = Object.keys(q).length;
+        const online = navigator.onLine && firebaseBagli;
+        el.innerHTML = `<span class="status-dot ${online?'online':'offline'}"></span>${online?'Çevrimiçi':'Çevrimdışı'}${n?` · Kuyruk: ${n}`:''}`;
+        el.title = n ? 'Gönderilmeyi bekleyen yerel puan kaydı var.' : 'Tüm puanlar senkron.';
+    }
+
+    async function ensureMatchExists(kategori, hukOkul, muhOkul) {
+        if (!hukOkul || !muhOkul) return null;
+        const id = macKimligiOlustur(kategori, hukOkul, muhOkul);
+        const ref = db.ref(`maclar/${kategori}/${id}`);
+        await ref.transaction(cur => {
+            if (cur) return { ...cur, id, kategori, hukOkul, muhOkul, etiket: macEtiketi(hukOkul, muhOkul), updatedAt: Date.now() };
+            return { id, kategori, hukOkul, muhOkul, etiket: macEtiketi(hukOkul, muhOkul), durum: 'acik', createdAt: Date.now(), updatedAt: Date.now(), version: 1 };
+        });
+        return id;
+    }
+
+    async function macDurumuGetir(kategori, macId) {
+        if (!macId) return { durum:'acik' };
+        const s = await db.ref(`maclar/${kategori}/${macId}`).once('value');
+        return s.val() || { durum:'acik' };
+    }
+
+    function dinleyicileriTemizle() {
+        if (aktifJuriListenerRef) { aktifJuriListenerRef.off(); aktifJuriListenerRef = null; }
+        if (aktifJuriMacListenerRef) { aktifJuriMacListenerRef.off(); aktifJuriMacListenerRef = null; }
+        aktifCanliPanelRefs.forEach(r => { try { r.off(); } catch (_) {} });
+        aktifCanliPanelRefs = [];
+        if (aktifTurnuvaRef) { try { aktifTurnuvaRef.off(); } catch (_) {} aktifTurnuvaRef = null; }
+    }
+
+    function anaMenu() {
+        dinleyicileriTemizle();
+        document.getElementById('app').innerHTML = `
+            <div class="card" style="text-align:center;">
+                <h2 style="border:none; margin-bottom:30px; font-size:28px; letter-spacing:0.5px;">MÜNAZARA KONTROL PANELİ</h2>
+                <button class="btn" style="padding:18px; background:var(--primary); border:none;" onclick="renderPuanlamaSecim()">Puanlama Modülü</button>
+                <button class="btn" style="padding:18px;" onclick="sifreliModulKontrol('ogrenci')">Öğrenci Yönetimi 🔒</button>
+                <button class="btn" style="padding:18px;" onclick="sifreliModulKontrol('turnuva')">Turnuva Ağacı 🔒</button>
+                <button class="btn" style="padding:18px;" onclick="sifreliModulKontrol('canli')">Yönetici Canlı Paneli 🔒</button>
+                <button class="btn" style="padding:12px; background:transparent; border-color:var(--border-color); margin-top:30px; font-size:14px; color:var(--text-muted);" onclick="renderHakkinda()">ℹ️ Uygulama Hakkında</button>
+            </div>`;
+    }
+
+    function renderHakkinda() {
+        dinleyicileriTemizle();
+        document.getElementById('app').innerHTML = `
+            <div class="card" style="text-align:center;">
+                <h2>Uygulama Hakkında</h2>
+                <div style="font-size:15px; color:var(--text-muted); margin-bottom:20px; line-height:1.6;">
+                    Bu yazılım, münazara turnuvalarının jüri değerlendirmelerini, puan tutanaklarını ve eleme ağaçlarını dijital, güvenli ve gerçek zamanlı olarak yönetmek amacıyla geliştirilmiştir.
+                </div>
+                <div class="about-team-list">
+                    <div style="font-size:12px; text-transform:uppercase; color:var(--accent); font-weight:bold; letter-spacing:1px; margin-bottom:12px; text-align:center;">Developed and Written by</div>
+                    <div class="about-team-item">💻 Muhammed Fatih TURAN</div>
+                    <div class="about-team-item">💻 Ali GENÇ</div>
+                    <div class="about-team-item">💻 Sümeyye AZİTİ</div>
+                    <div class="about-team-item">💻 Onur GÜLTEKİN</div>
+                    <div class="about-team-item">💻 Taylan GÜL</div>
+                </div>
+                <div style="font-size:13px; color:var(--text-muted); margin-top:15px;">Iğdır Millî Eğitim Müdürlüğü AR-GE Birimi Projesidir.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">Sürüm ${APP_VERSION} · Merkezi maç/turnuva durumu · çevrimdışı puan kuyruğu</div>
+                <button class="btn" style="background:#475569; margin-top:25px;" onclick="anaMenu()">← Ana Menüye Dön</button>
+            </div>`;
     }
 
     function sifreliModulKontrol(modulId) {
-        if (sessionStorage.getItem("adminGiris") === "onayli") {
-            if(modulId === 'ogrenci') return renderOgrenci();
-            if(modulId === 'turnuva') return renderTurnuva();
-        }
-
-        let girdi = prompt("Bu alana erişmek için yetkili şifresini giriniz:");
-        if (girdi !== null) {
-            let temizGirdi = girdi.trim(); 
-            let hashliGirdi = LogSifre(temizGirdi);
-            
-            if (hashliGirdi === kSifre) {
-                sessionStorage.setItem("adminGiris", "onayli");
-                if(modulId === 'ogrenci') renderOgrenci();
-                if(modulId === 'turnuva') renderTurnuva();
-            } else {
-                alert("Hatalı şifre! Erişim reddedildi.");
-            }
-        }
+        if (!adminYetkiliMi() && !adminSifreDogrula('Bu alana erişmek için yetkili şifresini giriniz:')) return;
+        if (modulId === 'ogrenci') return renderOgrenci();
+        if (modulId === 'turnuva') return renderTurnuva();
+        if (modulId === 'canli') return renderYoneticiCanliPanel();
     }
 
     // --- PUANLAMA MODÜLÜ ---
     function renderPuanlamaSecim() {
+        dinleyicileriTemizle();
         verilenPuanlar = {};
-        
+        const oturum = juriOturumuGetir();
+        if (oturum) {
+            secimler.juri = oturum.juri;
+            secimler.juriAd = oturum.ad;
+            secimleriKaydet();
+        }
+
+        const juriHtml = oturum ? `
+            <div class="kriter-card" style="border-color:var(--success);">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+                    <div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Bu cihazın jüri oturumu</div><b style="color:#34d399;">${htmlEscape(oturum.juri)} · ${htmlEscape(oturum.ad)}</b></div>
+                    <button class="btn" style="width:auto;padding:8px 12px;margin:0;background:#475569;" onclick="juriOturumunuSifirla()">Jüriyi Değiştir 🔒</button>
+                </div>
+            </div>` : `
+            <div class="kriter-card" style="border-color:#f59e0b;">
+                <div style="font-size:13px;color:#fbbf24;margin-bottom:8px;"><b>Önce bu tableti bir jüriye kilitleyin.</b> Kilit, yanlış jüri numarasıyla puan gönderilmesini önler.</div>
+                <div class="btn-grid" style="grid-template-columns:1fr 1fr 1fr;">
+                    ${BEKLENEN_JURILER.map(j=>`<button class="btn" onclick="juriOturumuKilitle('${j}')">${j} Olarak Kilitle</button>`).join('')}
+                </div>
+            </div>`;
+
         document.getElementById('app').innerHTML = `
             <div class="card">
                 <h2>Puanlama Modülü</h2>
+                ${juriHtml}
                 <div class="btn-grid" style="grid-template-columns: 1fr 1fr; margin-bottom:20px;">
                     <button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this, 'ORTAOKUL', 'puanlama')">ORTAOKUL MÜNAZARASI</button>
                     <button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this, 'LİSE', 'puanlama')">LİSE MÜNAZARASI</button>
                 </div>
-                
+
+                <select id="aktifMac" onchange="merkeziMacSecildi()"><option value="">Aktif Maç Seçiniz (veya aşağıdan manuel seçin)</option></select>
+                <div style="font-size:11px;color:var(--text-muted);margin:-3px 0 8px;">Turnuva ağacındaki maçlar burada merkezi kimlikle görünür. Manuel seçim de kullanılabilir.</div>
+
                 <select id="hukOkul" onchange="macOkulDegisti('hukOkul')"><option value="">Hükümet Okul Seçiniz</option></select>
                 <select id="muhOkul" onchange="macOkulDegisti('muhOkul')"><option value="">Muhalefet Okul Seçiniz</option></select>
-                
+
                 <div class="btn-grid" style="grid-template-columns: 1fr 1fr; margin-top:15px;">
                     <button class="btn taraf-btn ${secimler.taraf==='HÜKÜMET'?'btn-active':''}" style="border-left: 4px solid var(--hukumet);" onclick="tekSecim(this, 'taraf', 'taraf-btn')">HÜKÜMET</button>
                     <button class="btn taraf-btn ${secimler.taraf==='MUHALEFET'?'btn-active':''}" style="border-left: 4px solid var(--muhalefet);" onclick="tekSecim(this, 'taraf', 'taraf-btn')">MUHALEFET</button>
-                </div>
-
-                <div class="btn-grid" style="grid-template-columns: 1fr 1fr 1fr;">
-                    <button class="btn juri-btn ${secimler.juri==='1. Jüri'?'btn-active':''}" onclick="tekSecim(this, 'juri', 'juri-btn')">1. Jüri</button>
-                    <button class="btn juri-btn ${secimler.juri==='2. Jüri'?'btn-active':''}" onclick="tekSecim(this, 'juri', 'juri-btn')">2. Jüri</button>
-                    <button class="btn juri-btn ${secimler.juri==='3. Jüri'?'btn-active':''}" onclick="tekSecim(this, 'juri', 'juri-btn')">3. Jüri</button>
                 </div>
 
                 <div class="btn-grid" style="grid-template-columns: 1fr 1fr;" id="ogrenciButonAlani">
                     <div style="grid-column: span 2; text-align:center; padding:20px; color:var(--text-muted); font-style:italic;">Önce okulları belirleyip Taraf butonuna basınız.</div>
                 </div>
 
-                <button class="btn" style="background:var(--primary); border:none; margin-top:25px; font-size:16px; padding:16px;" onclick="puanlamaSayfasinaGec()">Kriterleri Puanla →</button>
+                <div id="canliJuriDurumu" class="kriter-card" style="margin-top:15px;">Canlı jüri durumu için maç ve öğrenci seçiniz.</div>
+
+                <button class="btn" style="background:var(--primary); border:none; margin-top:25px; font-size:16px; padding:16px;" onclick="puanlamaSayfasinaGec()" ${oturum?'':'disabled'}>Kriterleri Puanla →</button>
                 <button class="btn" style="background:var(--success); border:none;" onclick="sifreliRaporKontrol()">📊 Sonuçları Gör</button>
                 <button class="btn" style="background:#475569" onclick="anaMenu()">← Ana Menü</button>
             </div>`;
 
-        db.ref('okullar/' + secimler.kategori).once('value', (s) => {
-            let hSelect = document.getElementById('hukOkul');
-            let mSelect = document.getElementById('muhOkul');
+        Promise.all([
+            db.ref('okullar/' + secimler.kategori).once('value'),
+            db.ref('maclar/' + secimler.kategori).once('value')
+        ]).then(([s, mSnap]) => {
+            const hSelect = document.getElementById('hukOkul');
+            const mSelect = document.getElementById('muhOkul');
+            if (!hSelect || !mSelect) return;
             s.forEach(o => {
-                hSelect.innerHTML += `<option value="${o.key}">${o.key}</option>`;
-                mSelect.innerHTML += `<option value="${o.key}">${o.key}</option>`;
+                const ad = htmlEscape(o.key);
+                hSelect.innerHTML += `<option value="${ad}">${ad}</option>`;
+                mSelect.innerHTML += `<option value="${ad}">${ad}</option>`;
             });
-            
-            if(secimler.hukOkul) hSelect.value = secimler.hukOkul;
-            if(secimler.muhOkul) mSelect.value = secimler.muhOkul;
-            
-            if(secimler.taraf) ogrencileriYukle();
-        });
+            if (secimler.hukOkul) hSelect.value = secimler.hukOkul;
+            if (secimler.muhOkul) mSelect.value = secimler.muhOkul;
+
+            const macSelect = document.getElementById('aktifMac');
+            if (macSelect) {
+                const maclar = [];
+                mSnap.forEach(c => { const v=c.val(); if(v?.hukOkul && v?.muhOkul) maclar.push({ ...v, id: v.id || c.key }); });
+                maclar.sort((a,b)=>(a.etiket||'').localeCompare(b.etiket||'','tr'));
+                maclar.forEach(m => {
+                    const kapali = m.durum === 'kapali';
+                    macSelect.innerHTML += `<option value="${htmlEscape(m.id || '')}">${htmlEscape(m.etiket || macEtiketi(m.hukOkul,m.muhOkul))}${kapali?' [KAPALI]':''}</option>`;
+                });
+                if (secimler.macId && [...macSelect.options].some(o=>o.value===secimler.macId)) macSelect.value = secimler.macId;
+            }
+            if (secimler.taraf) ogrencileriYukle();
+            canliJuriTakibiBaslat();
+        }).catch(err => console.error('Puanlama seçimleri yüklenemedi:', err));
+    }
+
+    async function merkeziMacSecildi() {
+        const sel = document.getElementById('aktifMac');
+        const id = sel?.value || '';
+        if (!id) {
+            secimler.macId = '';
+            secimleriKaydet();
+            canliJuriTakibiBaslat();
+            return;
+        }
+        const snap = await db.ref(`maclar/${secimler.kategori}/${id}`).once('value');
+        const m = snap.val();
+        if (!m) return alert('Maç bilgisi bulunamadı.');
+        secimler.macId = id;
+        secimler.hukOkul = m.hukOkul;
+        secimler.muhOkul = m.muhOkul;
+        secimler.ogr = '';
+        secimler.okul = '';
+        secimleriKaydet();
+        const h = document.getElementById('hukOkul'), mu = document.getElementById('muhOkul');
+        if (h) h.value = m.hukOkul;
+        if (mu) mu.value = m.muhOkul;
+        if (secimler.taraf) ogrencileriYukle();
+        canliJuriTakibiBaslat();
     }
 
     function macOkulDegisti(tip) {
         secimler[tip] = document.getElementById(tip).value;
-        localStorage.setItem('aktifMacSecimleri', JSON.stringify(secimler));
+        secimler.macId = '';
+        secimler.ogr = '';
+        secimler.okul = '';
+        const ms = document.getElementById('aktifMac'); if (ms) ms.value = '';
+        secimleriKaydet();
         if(secimler.taraf) ogrencileriYukle();
+        canliJuriTakibiBaslat();
     }
 
-    function katSec(btn, kategori, modül) {
+    function katSec(btn, kategori, modul) {
         secimler.kategori = kategori;
         secimler.hukOkul = '';
         secimler.muhOkul = '';
         secimler.taraf = '';
         secimler.ogr = '';
         secimler.okul = '';
-        localStorage.setItem('aktifMacSecimleri', JSON.stringify(secimler));
-
-        if(modül === 'puanlama') renderPuanlamaSecim();
-        if(modül === 'ogrenci') renderOgrenci();
-        if(modül === 'turnuva') renderTurnuva();
+        secimler.macId = '';
+        const oturum = juriOturumuGetir();
+        if (oturum) { secimler.juri = oturum.juri; secimler.juriAd = oturum.ad; }
+        secimleriKaydet();
+        if(modul === 'puanlama') renderPuanlamaSecim();
+        if(modul === 'ogrenci') renderOgrenci();
+        if(modul === 'turnuva') renderTurnuva();
+        if(modul === 'canli') renderYoneticiCanliPanel();
     }
 
     function ogrencileriYukle() {
-        let hVal = document.getElementById('hukOkul').value;
-        let mVal = document.getElementById('muhOkul').value;
-        
+        const hVal = document.getElementById('hukOkul')?.value || secimler.hukOkul;
+        const mVal = document.getElementById('muhOkul')?.value || secimler.muhOkul;
         if(!secimler.taraf) return;
-        
-        let seciliOkulAd = secimler.taraf === "HÜKÜMET" ? hVal : mVal;
+        const seciliOkulAd = secimler.taraf === 'HÜKÜMET' ? hVal : mVal;
+        secimler.hukOkul = hVal;
+        secimler.muhOkul = mVal;
         secimler.okul = seciliOkulAd;
-        localStorage.setItem('aktifMacSecimleri', JSON.stringify(secimler));
-        
-        let alan = document.getElementById('ogrenciButonAlani');
-        if(!seciliOkulAd) { alan.innerHTML = '<div style="grid-column: span 2; text-align:center; color:var(--text-muted); font-style:italic;">Seçilen tarafa ait okul belirlenmemiş!</div>'; return; }
-        
+        secimleriKaydet();
+        const alan = document.getElementById('ogrenciButonAlani');
+        if(!alan) return;
+        if(!seciliOkulAd) {
+            alan.innerHTML = '<div style="grid-column: span 2; text-align:center; color:var(--text-muted); font-style:italic;">Seçilen tarafa ait okul belirlenmemiş!</div>';
+            return;
+        }
         alan.innerHTML = '<div style="grid-column: span 2; text-align:center;">Öğrenciler getiriliyor...</div>';
         db.ref('okullar/' + secimler.kategori + '/' + seciliOkulAd).once('value', (s) => {
-            alan.innerHTML = "";
+            alan.innerHTML = '';
             let sayac = 1;
             s.forEach(o => {
-                let rRol = sayac <= 3 ? sayac + '. Konuşmacı' : 'Grup Sözcüsü';
-                let btnText = `${o.val()} (${rRol})`;
-                let activeClass = secimler.ogr === btnText ? 'btn-active' : '';
-                alan.innerHTML += `<button class="btn ogr-btn ${activeClass}" onclick="tekSecim(this, 'ogr', 'ogr-btn')">${btnText}</button>`;
+                const rRol = sayac <= 3 ? sayac + '. Konuşmacı' : 'Grup Sözcüsü';
+                const btnText = `${o.val()} (${rRol})`;
+                const activeClass = secimler.ogr === btnText ? 'btn-active' : '';
+                const b = document.createElement('button');
+                b.className = `btn ogr-btn ${activeClass}`;
+                b.textContent = btnText;
+                b.onclick = () => tekSecim(b, 'ogr', 'ogr-btn');
+                alan.appendChild(b);
                 sayac++;
             });
+            canliJuriTakibiBaslat();
         });
     }
 
@@ -326,28 +574,80 @@
         document.querySelectorAll('.' + sinif).forEach(b => b.classList.remove('btn-active'));
         element.classList.add('btn-active');
         secimler[tip] = element.innerText;
-        localStorage.setItem('aktifMacSecimleri', JSON.stringify(secimler));
-        if(tip === 'taraf') { ogrencileriYukle(); }
+        if(tip === 'taraf') {
+            secimler.ogr = '';
+            ogrencileriYukle();
+        }
+        secimleriKaydet();
+        canliJuriTakibiBaslat();
     }
 
-    function puanlamaSayfasinaGec() {
-        if(!secimler.taraf || !secimler.juri || !secimler.ogr || !secimler.okul) return alert("Lütfen seçimleri eksiksiz yapın!");
-        verilenPuanlar = {};
+    function mevcutMacBilgisi() {
+        const huk = document.getElementById('hukOkul')?.value || secimler.hukOkul;
+        const muh = document.getElementById('muhOkul')?.value || secimler.muhOkul;
+        if (!huk || !muh) return null;
+        const id = secimler.macId || macKimligiOlustur(secimler.kategori, huk, muh);
+        return { id, hukOkul:huk, muhOkul:muh, etiket:macEtiketi(huk,muh) };
+    }
 
-        let html = `<div class="card"><h2>Puanlama Tablosu: ${secimler.ogr}</h2>
-                    <div style="font-size:14px; color:var(--text-muted); margin-bottom:20px;">Kategori: <b>${secimler.kategori}</b> | Okul: <b>${secimler.okul}</b> | Değerlendiren: <b>${secimler.juri}</b></div>
+    function canliJuriTakibiBaslat() {
+        if (aktifJuriListenerRef) { aktifJuriListenerRef.off(); aktifJuriListenerRef = null; }
+        if (aktifJuriMacListenerRef) { aktifJuriMacListenerRef.off(); aktifJuriMacListenerRef = null; }
+        const box = document.getElementById('canliJuriDurumu');
+        if (!box) return;
+        const mac = mevcutMacBilgisi();
+        if (!mac) { box.innerHTML = 'Canlı jüri durumu için iki okulu seçiniz.'; return; }
+        let sonKayitlar = [];
+        let sonMac = {durum:'acik'};
+        const render = () => {
+            const macKayitlari = sonKayitlar.filter(v => kayitMacId(v) === mac.id);
+            const gruplar = new Map();
+            macKayitlari.forEach(v => {
+                const k = ogrenciGrupKimligi(v);
+                if (!gruplar.has(k)) gruplar.set(k, new Set());
+                if (v.secim?.juri) gruplar.get(k).add(v.secim.juri);
+            });
+            const tam = [...gruplar.values()].filter(s=>BEKLENEN_JURILER.every(j=>s.has(j))).length;
+            let ogrHtml = '<span style="color:var(--text-muted);">Öğrenci seçilmedi.</span>';
+            if (secimler.ogr && secimler.okul) {
+                const ogrKisa = secimler.ogr.split(' (')[0];
+                const key = [mac.id, secimler.okul, ogrKisa].map(puanMetniNormalize).join('|');
+                const juriler = gruplar.get(key) || new Set();
+                const eksik = BEKLENEN_JURILER.filter(j=>!juriler.has(j));
+                ogrHtml = `<b>${htmlEscape(ogrKisa)}</b>: <span class="${eksik.length?'jury-missing':'jury-ok'}">${juriler.size}/3 jüri</span>${eksik.length?` · Eksik: ${htmlEscape(eksik.join(', '))}`:' · Tamamlandı'}`;
+            }
+            box.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><b>${htmlEscape(mac.etiket)}</b><span class="${sonMac.durum==='kapali'?'jury-missing':'jury-ok'}">${sonMac.durum==='kapali'?'MAÇ KAPALI':'MAÇ AÇIK'}</span></div><div style="margin-top:8px;">${ogrHtml}</div><div style="margin-top:6px;font-size:12px;color:var(--text-muted);">Puan girilmiş öğrenci/maç: ${gruplar.size} · 3/3 tamamlanan: ${tam}</div>`;
+        };
+        aktifJuriListenerRef = db.ref('puanlar/' + secimler.kategori);
+        aktifJuriListenerRef.on('value', s => { sonKayitlar = snapshotKayitlariniTekillestir(s); render(); });
+        aktifJuriMacListenerRef = db.ref(`maclar/${secimler.kategori}/${mac.id}`);
+        aktifJuriMacListenerRef.on('value', s => { sonMac = s.val() || {durum:'acik'}; render(); });
+    }
+
+    async function puanlamaSayfasinaGec() {
+        const oturum = juriOturumuGetir();
+        if (!oturum) return alert('Önce bu cihazı 1., 2. veya 3. jüriye kilitleyin.');
+        secimler.juri = oturum.juri;
+        secimler.juriAd = oturum.ad;
+        if(!secimler.taraf || !secimler.juri || !secimler.ogr || !secimler.okul || !secimler.hukOkul || !secimler.muhOkul) return alert('Lütfen seçimleri eksiksiz yapın!');
+        const mac = mevcutMacBilgisi();
+        if (!mac) return alert('Maç bilgisi eksik.');
+        if (navigator.onLine && firebaseBagli) {
+            const durum = await macDurumuGetir(secimler.kategori, mac.id);
+            if (durum?.durum === 'kapali') return alert('Bu maç yönetici tarafından kapatılmış. Yeni puan gönderilemez.');
+        }
+        verilenPuanlar = {};
+        const html = `<div class="card"><h2>Puanlama Tablosu: ${htmlEscape(secimler.ogr)}</h2>
+                    <div style="font-size:14px; color:var(--text-muted); margin-bottom:20px;">Kategori: <b>${htmlEscape(secimler.kategori)}</b> | Maç: <b>${htmlEscape(mac.etiket)}</b> | Okul: <b>${htmlEscape(secimler.okul)}</b> | Değerlendiren: <b>${htmlEscape(oturum.juri)} · ${htmlEscape(oturum.ad)}</b></div>
                     <div id="kriterListesi"></div>
                     <button id="btnPuanGonder" class="btn" style="background:var(--success); border:none; margin-top:25px; padding:16px; font-size:16px;" onclick="puanlariGonder()">Puanları Gönder ✓</button>
                     <button class="btn" style="background:#475569" onclick="renderPuanlamaSecim()">← Geri Dön</button></div>`;
         document.getElementById('app').innerHTML = html;
-
-        let list = document.getElementById('kriterListesi');
+        const list = document.getElementById('kriterListesi');
         krit.forEach((k, i) => {
-            let d = document.createElement('div'); d.className = 'kriter-card';
-            let kutular = "";
-            for(let n=1; n<=k.m; n++) {
-                kutular += `<div class="puan-btn" onclick="puanSec(this, ${i}, ${n})">${n}</div>`;
-            }
+            const d = document.createElement('div'); d.className = 'kriter-card';
+            let kutular = '';
+            for(let n=1; n<=k.m; n++) kutular += `<div class="puan-btn" onclick="puanSec(this, ${i}, ${n})">${n}</div>`;
             d.innerHTML = `<span class="kriter-label">${i+1}. ${k.t} <span style="color:var(--text-muted); font-weight:normal;">(Maks: ${k.m})</span></span><div class="puan-row">${kutular}</div>`;
             list.appendChild(d);
         });
@@ -361,59 +661,88 @@
 
     async function puanlariGonder() {
         if (puanGonderiliyor) return;
-        if(Object.keys(verilenPuanlar).length < 13) return alert("Lütfen tüm 13 kriteri puanlayın!");
-
-        const macKimligi = (secimler.hukOkul && secimler.muhOkul) ? `${secimler.hukOkul}-vs-${secimler.muhOkul}` : "Genel";
-        const kategoriRef = db.ref('puanlar/' + secimler.kategori);
-        const kayitId = puanKayitKimligi(secimler, macKimligi);
+        if(Object.keys(verilenPuanlar).length < 13) return alert('Lütfen tüm 13 kriteri puanlayın!');
+        const oturum = juriOturumuGetir();
+        if (!oturum) return alert('Jüri oturumu kilidi bulunamadı.');
+        secimler.juri = oturum.juri;
+        secimler.juriAd = oturum.ad;
+        const mac = mevcutMacBilgisi();
+        if (!mac) return alert('Maç bilgisi eksik.');
+        secimler.macId = mac.id;
+        secimleriKaydet();
+        const kayitId = puanKayitKimligi(secimler, mac.id);
         const btn = document.getElementById('btnPuanGonder');
-
         puanGonderiliyor = true;
         if (btn) { btn.disabled = true; btn.innerText = 'Gönderiliyor...'; }
 
+        const yerelZaman = Date.now();
+        const kayitTemel = {
+            secim: { ...secimler, juri: oturum.juri, juriAd: oturum.ad },
+            puanlar: { ...verilenPuanlar },
+            macId: mac.id,
+            mac: macEskiEtiketi(mac.hukOkul, mac.muhOkul),
+            macEtiketi: mac.etiket,
+            clientId: getClientId(),
+            localUpdatedAt: yerelZaman,
+            version: 3
+        };
+
         try {
-            // Hem yeni deterministik kaydı hem de eski push() kayıtlarını aynı doğal kimlikle bul.
+            if (!navigator.onLine || !firebaseBagli) {
+                puaniKuyrugaEkle({ kategori:secimler.kategori, macId:mac.id, kayitId, kayit:{...kayitTemel, createdAt:yerelZaman, updatedAt:yerelZaman, queuedOffline:true} });
+                alert('İnternet bağlantısı yok. Puan bu cihazda güvenli kuyruğa alındı; bağlantı gelince otomatik gönderilecek.');
+                secimler.ogr = '';
+                secimleriKaydet();
+                return renderPuanlamaSecim();
+            }
+
+            await ensureMatchExists(secimler.kategori, mac.hukOkul, mac.muhOkul);
+            const m = await macDurumuGetir(secimler.kategori, mac.id);
+            if (m?.durum === 'kapali') return alert('Bu maç yönetici tarafından kapatılmış. Puan gönderilmedi.');
+
+            const kategoriRef = db.ref('puanlar/' + secimler.kategori);
             const tumKayitlar = await kategoriRef.once('value');
             const eskiAyniKayitlar = [];
             tumKayitlar.forEach(c => {
                 const v = c.val();
                 if (!v || !v.secim || !v.puanlar) return;
-                if (puanKayitKimligi(v.secim, v.mac || 'Genel') === kayitId) {
-                    eskiAyniKayitlar.push({ key: c.key, value: v });
-                }
+                if (puanKayitKimligi(v.secim, kayitMacId(v)) === kayitId) eskiAyniKayitlar.push({ key:c.key, value:v });
             });
 
             if (eskiAyniKayitlar.length) {
                 const ogrAd = (secimler.ogr || '').split(' (')[0];
-                const onay = confirm(`${secimler.juri} tarafından ${ogrAd} için daha önce puan gönderilmiş.\n\nYeni puan önceki kaydın yerine geçecek; çift kayıt oluşturulmayacak. Devam edilsin mi?`);
+                const onay = confirm(`${oturum.juri} tarafından ${ogrAd} için daha önce puan gönderilmiş.\n\nYeni puan önceki kaydın yerine geçecek; çift kayıt oluşturulmayacak. Devam edilsin mi?`);
                 if (!onay) return;
             }
 
             const onceki = eskiAyniKayitlar.length ? eskiAyniKayitlar[eskiAyniKayitlar.length - 1].value : null;
-            const now = firebase.database.ServerValue.TIMESTAMP;
             const kayit = {
-                secim: { ...secimler },
-                puanlar: { ...verilenPuanlar },
-                mac: macKimligi,
-                createdAt: onceki?.createdAt || now,
-                updatedAt: now,
-                version: 2
+                ...kayitTemel,
+                createdAt: onceki?.createdAt || firebase.database.ServerValue.TIMESTAMP,
+                updatedAt: firebase.database.ServerValue.TIMESTAMP,
+                queuedOffline: false
             };
-
-            // Yeni tekil kaydı yaz, varsa eski mükerrer push kayıtlarını aynı atomik işlemde kaldır.
             const updates = {};
             updates[kayitId] = kayit;
             eskiAyniKayitlar.forEach(x => { if (x.key !== kayitId) updates[x.key] = null; });
             await kategoriRef.update(updates);
-
-            alert(eskiAyniKayitlar.length ? "Puan güncellendi. Önceki mükerrer kayıtlar tek kayıtta birleştirildi." : "Puanlar başarıyla buluta gönderildi!");
-            turnuvaAgacinaPuanYansit(secimler.kategori, secimler.hukOkul, secimler.muhOkul);
+            alert(eskiAyniKayitlar.length ? 'Puan güncellendi. Önceki mükerrer kayıtlar tek kayıtta birleştirildi.' : 'Puanlar başarıyla buluta gönderildi!');
+            await turnuvaAgacinaPuanYansit(secimler.kategori, mac.hukOkul, mac.muhOkul);
             secimler.ogr = '';
-            localStorage.setItem('aktifMacSecimleri', JSON.stringify(secimler));
+            secimleriKaydet();
             renderPuanlamaSecim();
         } catch (err) {
             console.error('Puan gönderme hatası:', err);
-            alert('Puan gönderilemedi: ' + (err?.message || err));
+            const code = String(err?.code || '').toLowerCase();
+            if (!code.includes('permission')) {
+                puaniKuyrugaEkle({ kategori:secimler.kategori, macId:mac.id, kayitId, kayit:{...kayitTemel, createdAt:yerelZaman, updatedAt:yerelZaman, queuedOffline:true} });
+                alert('Bağlantı sorunu nedeniyle puan yerel kuyruğa alındı. İnternet geldiğinde otomatik gönderilecek.');
+                secimler.ogr = '';
+                secimleriKaydet();
+                renderPuanlamaSecim();
+            } else {
+                alert('Puan gönderilemedi: Firebase erişim yetkisi reddedildi.');
+            }
         } finally {
             puanGonderiliyor = false;
             const yeniBtn = document.getElementById('btnPuanGonder');
@@ -421,270 +750,200 @@
         }
     }
 
-    function turnuvaAgacinaPuanYansit(kat, hukOkul, muhOkul) {
-        if(!hukOkul || !muhOkul) return;
-        let hafizaAnahtari = 'turnuvaData_' + kat;
-        let localData = JSON.parse(localStorage.getItem(hafizaAnahtari));
-        if(!localData) return;
-
-        db.ref('puanlar/' + kat).once('value', (s) => {
-            let tHuk = 0, tMuh = 0;
-            const kayitlar = snapshotKayitlariniTekillestir(s);
-            kayitlar.forEach(v => {
-                if(v.mac === `${hukOkul}-vs-${muhOkul}`) {
-                    const toplam = puanToplami(v);
-                    if(v.secim.okul === hukOkul) tHuk += toplam;
-                    if(v.secim.okul === muhOkul) tMuh += toplam;
-                }
-            });
-
-            let hInput = null, mInput = null, mIdx = null;
-            let boxes = document.querySelectorAll(`[id^="box-${localData.turSayaci}-"]`);
-            boxes.forEach(box => {
-                let bText = box.innerText;
-                if(bText.includes(hukOkul) && bText.includes(muhOkul)) {
-                    mIdx = box.id.split('-').pop();
-                    hInput = document.getElementById(`skor-${localData.turSayaci}-${mIdx}-1`);
-                    mInput = document.getElementById(`skor-${localData.turSayaci}-${mIdx}-2`);
-                }
-            });
-
-            if(hInput && mInput) {
-                hInput.value = tHuk;
-                mInput.value = tMuh;
-                
-                localData.kazananlarMap[mIdx + "_s1"] = tHuk;
-                localData.kazananlarMap[mIdx + "_s2"] = tMuh;
-
-                let statusDiv = document.getElementById(`status-${localData.turSayaci}-${mIdx}`);
-                if (tHuk > tMuh) {
-                    localData.kazananlarMap[mIdx] = hukOkul;
-                    if(statusDiv) statusDiv.innerHTML = `<div class="win-tag">Kazanan: ${hukOkul}</div>`;
-                } else if (tMuh > tHuk) {
-                    localData.kazananlarMap[mIdx] = muhOkul;
-                    if(statusDiv) statusDiv.innerHTML = `<div class="win-tag">Kazanan: ${muhOkul}</div>`;
-                }
-                
-                localData.aktifHtml = document.getElementById('aktif-tur-container').innerHTML;
-                localStorage.setItem(hafizaAnahtari, JSON.stringify(localData));
-                kontrolEtVeButonGoster();
-            }
-        });
-    }
-
+    // --- RAPORLAMA ---
     function sifreliRaporKontrol() {
-        if (sessionStorage.getItem("adminGiris") === "onayli") {
-            return showReport();
-        }
-        let girdi = prompt("Şifre giriniz:");
-        if (girdi !== null) {
-            let hashliGirdi = LogSifre(girdi.trim());
-            if (hashliGirdi === kSifre) {
-                sessionStorage.setItem("adminGiris", "onayli");
-                showReport();
-            } else alert("Hatalı şifre! Erişim reddedildi.");
-        }
+        if (!adminYetkiliMi() && !adminSifreDogrula('Sonuçlara erişmek için yetkili şifresini giriniz:')) return;
+        showReport();
     }
 
-    function showReport() {
+    async function showReport() {
+        dinleyicileriTemizle();
         document.getElementById('app').innerHTML = `
             <div class="card" style="max-width:1100px;">
                 <h2>Münazara Sonuç Merkezi (${secimler.kategori})</h2>
-
                 <div id="adminMetrics" class="admin-summary-grid">
                     <div class="admin-metric"><span>Tekil Puan Kaydı</span><strong>—</strong></div>
                     <div class="admin-metric"><span>Puanlanan Öğrenci/Maç</span><strong>—</strong></div>
                     <div class="admin-metric"><span>3/3 Jüri Tamam</span><strong>—</strong></div>
                     <div class="admin-metric"><span>Jürisi Eksik</span><strong>—</strong></div>
                 </div>
-
                 <div class="report-summary-grid">
-                    <div>
-                        <h4 style="margin-bottom:8px; color:var(--text-muted);">🏆 En İyi Konuşmacılar (MVP)</h4>
-                        <div id="mvp-podium" class="mvp-box">Hesaplanıyor...</div>
-                    </div>
-                    <div>
-                        <h4 style="margin-bottom:8px; color:var(--text-muted);">🏫 Okulların Toplam Puanları</h4>
-                        <div id="school-leaderboard" class="school-total-box">Hesaplanıyor...</div>
-                    </div>
+                    <div><h4 style="margin-bottom:8px; color:var(--text-muted);">🏆 En İyi Konuşmacılar (MVP)</h4><div id="mvp-podium" class="mvp-box">Hesaplanıyor...</div></div>
+                    <div><h4 style="margin-bottom:8px; color:var(--text-muted);">🏫 Okulların Toplam Puanları</h4><div id="school-leaderboard" class="school-total-box">Hesaplanıyor...</div></div>
                 </div>
-
-                <div class="kriter-card" style="margin-bottom:18px;">
-                    <h3 style="margin-top:0; color:var(--text-main);">Jüri Tamamlama Kontrolü</h3>
-                    <div id="juryCoverage" style="overflow-x:auto;">Hesaplanıyor...</div>
-                </div>
-
+                <div class="kriter-card" style="margin-bottom:18px;"><h3 style="margin-top:0; color:var(--text-main);">Jüri Tamamlama Kontrolü</h3><div id="juryCoverage" style="overflow-x:auto;">Hesaplanıyor...</div></div>
                 <div class="no-print" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:15px;">
                     <button class="btn" style="background:var(--success);border:none;margin:0;" onclick="raporuExcelIndir()">Excel İndir (.xlsx)</button>
                     <button class="btn" style="background:var(--primary);border:none;margin:0;" onclick="window.print()">Yazdır / PDF Al</button>
                     <button class="btn" style="background:#475569;margin:0;" onclick="renderPuanlamaSecim()">Kapat</button>
                 </div>
-
                 <select id="macFiltre" style="margin-bottom:20px;" class="no-print" onchange="tutanakTablosuDoldur()"><option value="hepsi">Tüm Maçların Genel Raporu</option></select>
                 <div id="rapor-tablosu" style="overflow-x:auto;">Veriler derleniyor...</div>
-
                 <div style="display:flex; justify-content:space-between; margin-top:80px;">
                     <div style="border-top:1px solid #000; width:25%; text-align:center; padding-top:8px; color:var(--text-muted);">1. Jüri İmza</div>
                     <div style="border-top:1px solid #000; width:25%; text-align:center; padding-top:8px; color:var(--text-muted);">2. Jüri İmza</div>
                     <div style="border-top:1px solid #000; width:25%; text-align:center; padding-top:8px; color:var(--text-muted);">3. Jüri İmza</div>
                 </div>
             </div>`;
-
-        db.ref('puanlar/' + secimler.kategori).once('value', (s) => {
+        try {
+            const [s, mSnap] = await Promise.all([db.ref('puanlar/' + secimler.kategori).once('value'), db.ref('maclar/' + secimler.kategori).once('value')]);
             const kayitlar = snapshotKayitlariniTekillestir(s);
-            const filtre = document.getElementById('macFiltre');
-            const mSet = new Set();
-            const ogrenciPuanlari = {};
-            const okulPuanlari = {};
-            const juriGruplari = {};
-
-            kayitlar.forEach(v => {
-                if(v.mac) mSet.add(v.mac);
-                const toplamPuan = puanToplami(v);
-                const secim = v.secim || {};
-                const ogrKisa = (secim.ogr || '').split(' (')[0];
-
-                if(secim.ogr) {
-                    const temizIsim = ogrKisa + " (" + (secim.okul || '-') + ")";
-                    if(!ogrenciPuanlari[temizIsim]) ogrenciPuanlari[temizIsim] = { skor: 0, sayac: 0 };
-                    ogrenciPuanlari[temizIsim].skor += toplamPuan;
-                    ogrenciPuanlari[temizIsim].sayac += 1;
-
-                    const gk = ogrenciGrupKimligi(v);
-                    if(!juriGruplari[gk]) juriGruplari[gk] = {
-                        mac: v.mac || 'Genel', okul: secim.okul || '-', ogrenci: ogrKisa, juriler: new Set(), toplam: 0, sayac: 0
-                    };
-                    if(secim.juri) juriGruplari[gk].juriler.add(secim.juri);
-                    juriGruplari[gk].toplam += toplamPuan;
-                    juriGruplari[gk].sayac += 1;
-                }
-
-                if(secim.okul) {
-                    if(!okulPuanlari[secim.okul]) okulPuanlari[secim.okul] = 0;
-                    okulPuanlari[secim.okul] += toplamPuan;
-                }
-            });
-
-            if(filtre) {
-                [...mSet].sort((a,b)=>a.localeCompare(b,'tr')).forEach(m => filtre.innerHTML += `<option value="${m}">${m.replace('-vs-', ' VS ')}</option>`);
-            }
-
-            const siraliList = Object.keys(ogrenciPuanlari).map(isim => ({
-                isim,
-                ortalama: Number((ogrenciPuanlari[isim].skor / ogrenciPuanlari[isim].sayac).toFixed(1)),
-                juriSayisi: ogrenciPuanlari[isim].sayac
-            })).sort((a,b) => b.ortalama - a.ortalama);
-
-            const podium = document.getElementById('mvp-podium');
-            if(siraliList.length > 0) {
-                podium.innerHTML = "";
-                for(let i=0; i<Math.min(3, siraliList.length); i++) {
-                    podium.innerHTML += `<div class="summary-row"><span class="summary-name">${siraliList[i].isim.split(' (')[0]}</span><span class="summary-score">${siraliList[i].ortalama.toFixed(1)} Ort.</span></div>`;
-                }
-            } else { podium.innerHTML = "Veri yok."; }
-
-            const siraliOkullar = Object.keys(okulPuanlari).map(oAd => ({ isim:oAd, toplam:okulPuanlari[oAd] })).sort((a,b)=>b.toplam-a.toplam);
-            const schoolBoard = document.getElementById('school-leaderboard');
-            if(siraliOkullar.length > 0) {
-                schoolBoard.innerHTML = "";
-                siraliOkullar.forEach((okulData, index) => {
-                    schoolBoard.innerHTML += `<div class="summary-row"><span class="summary-name">${index+1}. ${okulData.isim}</span><span class="summary-score">${okulData.toplam} Puan</span></div>`;
-                });
-            } else { schoolBoard.innerHTML = "Veri yok."; }
-
-            const juriRows = Object.values(juriGruplari).sort((a,b) => (a.mac+a.okul+a.ogrenci).localeCompare(b.mac+b.okul+b.ogrenci,'tr'));
-            const tamSayisi = juriRows.filter(x => BEKLENEN_JURILER.every(j => x.juriler.has(j))).length;
-            const eksikSayisi = juriRows.length - tamSayisi;
-            const metrics = document.getElementById('adminMetrics');
-            if(metrics) metrics.innerHTML = `
-                <div class="admin-metric"><span>Tekil Puan Kaydı</span><strong>${kayitlar.length}</strong></div>
-                <div class="admin-metric"><span>Puanlanan Öğrenci/Maç</span><strong>${juriRows.length}</strong></div>
-                <div class="admin-metric"><span>3/3 Jüri Tamam</span><strong>${tamSayisi}</strong></div>
-                <div class="admin-metric"><span>Jürisi Eksik</span><strong>${eksikSayisi}</strong></div>`;
-
-            const coverage = document.getElementById('juryCoverage');
-            if(coverage) {
-                let html = '<table class="tutanak-table"><tr><th>Maç</th><th>Okul</th><th>Öğrenci</th><th>Jüri Durumu</th><th>Eksik Jüri</th><th>Ortalama</th></tr>';
-                juriRows.forEach(x => {
-                    const eksikler = BEKLENEN_JURILER.filter(j => !x.juriler.has(j));
-                    const tam = eksikler.length === 0;
-                    const ort = x.sayac ? (x.toplam / x.sayac).toFixed(1) : '-';
-                    html += `<tr><td>${x.mac.replace('-vs-',' VS ')}</td><td>${x.okul}</td><td>${x.ogrenci}</td><td class="${tam?'jury-ok':'jury-missing'}">${x.juriler.size}/3</td><td>${tam ? '—' : eksikler.join(', ')}</td><td>${ort}</td></tr>`;
-                });
-                coverage.innerHTML = html + '</table>';
-            }
-
-            sonRaporVerisi = { kategori: secimler.kategori, kayitlar, juriRows, siraliList, siraliOkullar };
-            tutanakTablosuDoldur();
-        }).catch(err => {
+            const maclarMap = {};
+            mSnap.forEach(c=>{maclarMap[c.key]=c.val();});
+            raporVerisiniIsle(kayitlar, maclarMap);
+        } catch (err) {
             console.error('Rapor verisi okunamadı:', err);
             alert('Sonuçlar okunamadı: ' + (err?.message || err));
+        }
+    }
+
+    function raporVerisiniIsle(kayitlar, maclarMap) {
+        const filtre = document.getElementById('macFiltre');
+        const mSet = new Map();
+        const ogrenciPuanlari = {};
+        const okulPuanlari = {};
+        const juriGruplari = {};
+        kayitlar.forEach(v => {
+            const mid = kayitMacId(v), ml = kayitMacEtiketi(v);
+            mSet.set(mid, ml);
+            const toplamPuan = puanToplami(v);
+            const secim = v.secim || {};
+            const ogrKisa = (secim.ogr || '').split(' (')[0];
+            if(secim.ogr) {
+                const temizIsim = ogrKisa + ' (' + (secim.okul || '-') + ')';
+                if(!ogrenciPuanlari[temizIsim]) ogrenciPuanlari[temizIsim] = { skor:0, sayac:0 };
+                ogrenciPuanlari[temizIsim].skor += toplamPuan;
+                ogrenciPuanlari[temizIsim].sayac += 1;
+                const gk = ogrenciGrupKimligi(v);
+                if(!juriGruplari[gk]) juriGruplari[gk] = { macId:mid, mac:ml, okul:secim.okul||'-', ogrenci:ogrKisa, juriler:new Set(), toplam:0, sayac:0 };
+                if(secim.juri) juriGruplari[gk].juriler.add(secim.juri);
+                juriGruplari[gk].toplam += toplamPuan;
+                juriGruplari[gk].sayac += 1;
+            }
+            if(secim.okul) {
+                if(!okulPuanlari[secim.okul]) okulPuanlari[secim.okul]=0;
+                okulPuanlari[secim.okul] += toplamPuan;
+            }
         });
+        if(filtre) {
+            [...mSet.entries()].sort((a,b)=>a[1].localeCompare(b[1],'tr')).forEach(([id,lbl])=>filtre.innerHTML += `<option value="${htmlEscape(id)}">${htmlEscape(lbl)}</option>`);
+        }
+        const siraliList = Object.keys(ogrenciPuanlari).map(isim=>({isim,ortalama:Number((ogrenciPuanlari[isim].skor/ogrenciPuanlari[isim].sayac).toFixed(1)),juriSayisi:ogrenciPuanlari[isim].sayac})).sort((a,b)=>b.ortalama-a.ortalama);
+        const podium=document.getElementById('mvp-podium');
+        if(siraliList.length){podium.innerHTML=''; for(let i=0;i<Math.min(3,siraliList.length);i++) podium.innerHTML += `<div class="summary-row"><span class="summary-name">${htmlEscape(siraliList[i].isim.split(' (')[0])}</span><span class="summary-score">${siraliList[i].ortalama.toFixed(1)} Ort.</span></div>`;} else podium.innerHTML='Veri yok.';
+        const siraliOkullar=Object.keys(okulPuanlari).map(oAd=>({isim:oAd,toplam:okulPuanlari[oAd]})).sort((a,b)=>b.toplam-a.toplam);
+        const schoolBoard=document.getElementById('school-leaderboard');
+        if(siraliOkullar.length){schoolBoard.innerHTML=''; siraliOkullar.forEach((x,i)=>schoolBoard.innerHTML += `<div class="summary-row"><span class="summary-name">${i+1}. ${htmlEscape(x.isim)}</span><span class="summary-score">${x.toplam} Puan</span></div>`);} else schoolBoard.innerHTML='Veri yok.';
+        const juriRows=Object.values(juriGruplari).sort((a,b)=>(a.mac+a.okul+a.ogrenci).localeCompare(b.mac+b.okul+b.ogrenci,'tr'));
+        const tamSayisi=juriRows.filter(x=>BEKLENEN_JURILER.every(j=>x.juriler.has(j))).length;
+        const eksikSayisi=juriRows.length-tamSayisi;
+        const metrics=document.getElementById('adminMetrics');
+        if(metrics) metrics.innerHTML=`<div class="admin-metric"><span>Tekil Puan Kaydı</span><strong>${kayitlar.length}</strong></div><div class="admin-metric"><span>Puanlanan Öğrenci/Maç</span><strong>${juriRows.length}</strong></div><div class="admin-metric"><span>3/3 Jüri Tamam</span><strong>${tamSayisi}</strong></div><div class="admin-metric"><span>Jürisi Eksik</span><strong>${eksikSayisi}</strong></div>`;
+        const coverage=document.getElementById('juryCoverage');
+        if(coverage){let html='<table class="tutanak-table"><tr><th>Maç</th><th>Okul</th><th>Öğrenci</th><th>Jüri Durumu</th><th>Eksik Jüri</th><th>Ortalama</th></tr>'; juriRows.forEach(x=>{const eksikler=BEKLENEN_JURILER.filter(j=>!x.juriler.has(j)); const tam=!eksikler.length; const ort=x.sayac?(x.toplam/x.sayac).toFixed(1):'-'; html += `<tr><td>${htmlEscape(x.mac)}</td><td>${htmlEscape(x.okul)}</td><td>${htmlEscape(x.ogrenci)}</td><td class="${tam?'jury-ok':'jury-missing'}">${x.juriler.size}/3</td><td>${tam?'—':htmlEscape(eksikler.join(', '))}</td><td>${ort}</td></tr>`;}); coverage.innerHTML=html+'</table>';}
+        sonRaporVerisi={kategori:secimler.kategori,kayitlar,juriRows,siraliList,siraliOkullar,maclarMap};
+        tutanakTablosuDoldur();
     }
 
     function tutanakTablosuDoldur() {
-        const fElement = document.getElementById('macFiltre');
-        const seciliMac = fElement ? fElement.value : "hepsi";
-
-        const render = (kayitlar) => {
-            let html = '<table class="tutanak-table"><tr><th>Taraf</th><th>Okul</th><th>Öğrenci</th><th>Jüri</th>' +
-                       krit.map(k => `<th>${k.t.substring(0,4)}.</th>`).join('') + '<th>TOPLAM</th></tr>';
-            kayitlar.forEach(v => {
-                if(seciliMac !== "hepsi" && v.mac !== seciliMac) return;
-                const ps = krit.map((_k,i) => Number(v.puanlar?.[i] ?? v.puanlar?.[String(i)] ?? 0));
-                const t = ps.reduce((a,b)=>a+b,0);
-                html += `<tr><td>${v.secim.taraf}</td><td>${v.secim.okul || '-'}</td><td>${(v.secim.ogr || '').split(' (')[0]}</td><td>${v.secim.juri}</td>` +
-                        ps.map(p => `<td>${p}</td>`).join('') + `<td><b style="color:var(--accent);">${t}</b></td></tr>`;
-            });
-            document.getElementById('rapor-tablosu').innerHTML = html + '</table>';
-        };
-
-        if(sonRaporVerisi && sonRaporVerisi.kategori === secimler.kategori) return render(sonRaporVerisi.kayitlar);
-        db.ref('puanlar/' + secimler.kategori).once('value', s => render(snapshotKayitlariniTekillestir(s)));
+        const fElement=document.getElementById('macFiltre');
+        const seciliMac=fElement?fElement.value:'hepsi';
+        const render=(kayitlar)=>{let html='<table class="tutanak-table"><tr><th>Taraf</th><th>Okul</th><th>Öğrenci</th><th>Jüri</th>'+krit.map(k=>`<th>${k.t.substring(0,4)}.</th>`).join('')+'<th>TOPLAM</th></tr>'; kayitlar.forEach(v=>{if(seciliMac!=='hepsi'&&kayitMacId(v)!==seciliMac)return; const ps=krit.map((_k,i)=>Number(v.puanlar?.[i]??v.puanlar?.[String(i)]??0)); const t=ps.reduce((a,b)=>a+b,0); html += `<tr><td>${htmlEscape(v.secim.taraf)}</td><td>${htmlEscape(v.secim.okul||'-')}</td><td>${htmlEscape((v.secim.ogr||'').split(' (')[0])}</td><td>${htmlEscape(v.secim.juri)}</td>${ps.map(p=>`<td>${p}</td>`).join('')}<td><b style="color:var(--accent);">${t}</b></td></tr>`;}); document.getElementById('rapor-tablosu').innerHTML=html+'</table>';};
+        if(sonRaporVerisi&&sonRaporVerisi.kategori===secimler.kategori)return render(sonRaporVerisi.kayitlar);
+        db.ref('puanlar/'+secimler.kategori).once('value',s=>render(snapshotKayitlariniTekillestir(s)));
     }
 
     function raporuExcelIndir() {
-        if(!sonRaporVerisi || !sonRaporVerisi.kayitlar?.length) return alert('Excel için puan verisi bulunamadı.');
-
-        const puanRows = sonRaporVerisi.kayitlar.map(v => {
-            const satir = {
-                'Kategori': sonRaporVerisi.kategori,
-                'Maç': (v.mac || 'Genel').replace('-vs-', ' VS '),
-                'Taraf': v.secim?.taraf || '',
-                'Okul': v.secim?.okul || '',
-                'Öğrenci': (v.secim?.ogr || '').split(' (')[0],
-                'Jüri': v.secim?.juri || ''
-            };
-            krit.forEach((k,i) => satir[`${i+1}. ${k.t}`] = Number(v.puanlar?.[i] ?? v.puanlar?.[String(i)] ?? 0));
-            satir['Toplam'] = puanToplami(v);
-            satir['Son Güncelleme'] = v.updatedAt ? new Date(v.updatedAt).toLocaleString('tr-TR') : '';
-            return satir;
-        });
-
-        const juriRows = sonRaporVerisi.juriRows.map(x => {
-            const eksikler = BEKLENEN_JURILER.filter(j => !x.juriler.has(j));
-            return {
-                'Maç': x.mac.replace('-vs-',' VS '), 'Okul':x.okul, 'Öğrenci':x.ogrenci,
-                'Jüri Sayısı':x.juriler.size, 'Tamamlayan Jüriler':[...x.juriler].join(', '),
-                'Eksik Jüriler':eksikler.join(', '), 'Ortalama':x.sayac ? Number((x.toplam/x.sayac).toFixed(1)) : ''
-            };
-        });
-
-        const okulRows = sonRaporVerisi.siraliOkullar.map((x,i)=>({'Sıra':i+1,'Okul':x.isim,'Toplam Puan':x.toplam}));
-        const mvpRows = sonRaporVerisi.siraliList.map((x,i)=>({'Sıra':i+1,'Öğrenci':x.isim.split(' (')[0],'Okul':(x.isim.match(/\((.*)\)$/)||[])[1]||'','Ortalama':x.ortalama,'Jüri Kaydı':x.juriSayisi}));
-
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(puanRows), 'Puanlar');
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(juriRows), 'Juri Durumu');
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(okulRows), 'Okul Ozeti');
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mvpRows), 'MVP');
-
-        const tarih = new Date().toISOString().slice(0,10);
-        XLSX.writeFile(wb, `Munazara_Sonuclari_${sonRaporVerisi.kategori}_${tarih}.xlsx`);
+        if(!sonRaporVerisi||!sonRaporVerisi.kayitlar?.length)return alert('Excel için puan verisi bulunamadı.');
+        const puanRows=sonRaporVerisi.kayitlar.map(v=>{const mid=kayitMacId(v); const m=sonRaporVerisi.maclarMap?.[mid]||{}; const satir={'Kategori':sonRaporVerisi.kategori,'Maç ID':mid,'Maç':kayitMacEtiketi(v),'Maç Durumu':m.durum||'','Taraf':v.secim?.taraf||'','Okul':v.secim?.okul||'','Öğrenci':(v.secim?.ogr||'').split(' (')[0],'Jüri':v.secim?.juri||'','Jüri Adı':v.secim?.juriAd||''}; krit.forEach((k,i)=>satir[`${i+1}. ${k.t}`]=Number(v.puanlar?.[i]??v.puanlar?.[String(i)]??0)); satir['Toplam']=puanToplami(v); satir['Son Güncelleme']=v.updatedAt&&typeof v.updatedAt==='number'?new Date(v.updatedAt).toLocaleString('tr-TR'):''; return satir;});
+        const juriRows=sonRaporVerisi.juriRows.map(x=>{const eksikler=BEKLENEN_JURILER.filter(j=>!x.juriler.has(j)); return {'Maç ID':x.macId,'Maç':x.mac,'Okul':x.okul,'Öğrenci':x.ogrenci,'Jüri Sayısı':x.juriler.size,'Tamamlayan Jüriler':[...x.juriler].join(', '),'Eksik Jüriler':eksikler.join(', '),'Ortalama':x.sayac?Number((x.toplam/x.sayac).toFixed(1)):''};});
+        const okulRows=sonRaporVerisi.siraliOkullar.map((x,i)=>({'Sıra':i+1,'Okul':x.isim,'Toplam Puan':x.toplam}));
+        const mvpRows=sonRaporVerisi.siraliList.map((x,i)=>({'Sıra':i+1,'Öğrenci':x.isim.split(' (')[0],'Okul':(x.isim.match(/\((.*)\)$/)||[])[1]||'','Ortalama':x.ortalama,'Jüri Kaydı':x.juriSayisi}));
+        const wb=XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(puanRows),'Puanlar');
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(juriRows),'Juri Durumu');
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(okulRows),'Okul Ozeti');
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mvpRows),'MVP');
+        const tarih=new Date().toISOString().slice(0,10); XLSX.writeFile(wb,`Munazara_Sonuclari_${sonRaporVerisi.kategori}_${tarih}.xlsx`);
     }
 
-    // --- ÖĞRENCİ YÖNETİMİ & DOĞRUDAN EXCEL (.XLSX) YÜKLEME ---
+    // --- YÖNETİCİ CANLI PANELİ ---
+    function renderYoneticiCanliPanel() {
+        dinleyicileriTemizle();
+        document.getElementById('app').innerHTML = `
+            <div class="card" style="max-width:1200px;">
+                <h2>Yönetici Canlı Operasyon Paneli</h2>
+                <div class="btn-grid" style="grid-template-columns:1fr 1fr;margin-bottom:15px;">
+                    <button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this,'ORTAOKUL','canli')">ORTAOKUL</button>
+                    <button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this,'LİSE','canli')">LİSE</button>
+                </div>
+                <div id="liveMetrics" class="admin-summary-grid"></div>
+                <div class="kriter-card"><h3 style="margin-top:0;color:var(--text-main);">Maçlar ve 3/3 Jüri Durumu</h3><div id="liveMatches" style="overflow-x:auto;">Yükleniyor...</div></div>
+                <div class="no-print" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                    <button class="btn" style="background:var(--primary);border:none;" onclick="yedekJsonIndir()">⬇ JSON Yedeği İndir</button>
+                    <button class="btn" style="background:var(--success);border:none;" onclick="firebaseArsivYedegiAl(false)">☁ Firebase Arşivine Yedekle</button>
+                </div>
+                <button class="btn" style="background:#475569" onclick="anaMenu()">← Ana Menü</button>
+            </div>`;
+        let skorlar=[], maclar={}, okullar={};
+        const render=()=>canliPaneliCiz(skorlar,maclar,okullar);
+        const pRef=db.ref('puanlar/'+secimler.kategori); pRef.on('value',s=>{skorlar=snapshotKayitlariniTekillestir(s);render();}); aktifCanliPanelRefs.push(pRef);
+        const mRef=db.ref('maclar/'+secimler.kategori); mRef.on('value',s=>{maclar={};s.forEach(c=>maclar[c.key]=c.val());render();}); aktifCanliPanelRefs.push(mRef);
+        const oRef=db.ref('okullar/'+secimler.kategori); oRef.on('value',s=>{okullar={};s.forEach(c=>{okullar[c.key]=[];c.forEach(x=>okullar[c.key].push(String(x.val())));});render();}); aktifCanliPanelRefs.push(oRef);
+    }
+
+    function canliPaneliCiz(skorlar, maclar, okullar) {
+        const inferred={...maclar};
+        skorlar.forEach(v=>{const id=kayitMacId(v); if(!inferred[id]) inferred[id]={id,etiket:kayitMacEtiketi(v),hukOkul:v.secim?.hukOkul||'',muhOkul:v.secim?.muhOkul||'',durum:'acik'};});
+        const rows=[];
+        Object.entries(inferred).forEach(([id,m])=>{
+            const mk=skorlar.filter(v=>kayitMacId(v)===id);
+            const expected=[];
+            (okullar[m.hukOkul]||[]).forEach(x=>expected.push({okul:m.hukOkul,ogr:x}));
+            (okullar[m.muhOkul]||[]).forEach(x=>expected.push({okul:m.muhOkul,ogr:x}));
+            const seen=new Map();
+            mk.forEach(v=>{const ogr=(v.secim?.ogr||'').split(' (')[0];const key=`${v.secim?.okul||''}|${ogr}`;if(!seen.has(key))seen.set(key,new Set());if(v.secim?.juri)seen.get(key).add(v.secim.juri);});
+            const groups=expected.length?expected.map(x=>({key:`${x.okul}|${x.ogr}`,okul:x.okul,ogr:x.ogr,juriler:seen.get(`${x.okul}|${x.ogr}`)||new Set()})):[...seen.entries()].map(([key,j])=>({key,okul:key.split('|')[0],ogr:key.split('|').slice(1).join('|'),juriler:j}));
+            const tam=groups.filter(g=>BEKLENEN_JURILER.every(j=>g.juriler.has(j))).length;
+            const eksik=groups.length-tam;
+            const eksikRoller=new Set(); groups.forEach(g=>BEKLENEN_JURILER.forEach(j=>{if(!g.juriler.has(j))eksikRoller.add(j);}));
+            rows.push({id,m,records:mk.length,total:groups.length,tam,eksik,eksikRoller:[...eksikRoller]});
+        });
+        rows.sort((a,b)=>(a.m.etiket||'').localeCompare(b.m.etiket||'','tr'));
+        const metrics=document.getElementById('liveMetrics');
+        if(metrics){const acik=rows.filter(r=>r.m.durum!=='kapali').length;const kapali=rows.length-acik;const tamMac=rows.filter(r=>r.total>0&&r.eksik===0).length;const q=Object.keys(offlineKuyrukGetir()).length;metrics.innerHTML=`<div class="admin-metric"><span>Maç</span><strong>${rows.length}</strong></div><div class="admin-metric"><span>Açık / Kapalı</span><strong>${acik}/${kapali}</strong></div><div class="admin-metric"><span>Jürisi Tam Maç</span><strong>${tamMac}</strong></div><div class="admin-metric"><span>Bu Cihaz Kuyruğu</span><strong>${q}</strong></div>`;}
+        const div=document.getElementById('liveMatches'); if(!div)return;
+        let html='<table class="tutanak-table"><tr><th>Maç</th><th>Durum</th><th>Öğrenci</th><th>3/3 Tam</th><th>Eksik</th><th>Eksik Jüri</th><th>İşlem</th></tr>';
+        rows.forEach(r=>{const kap=r.m.durum==='kapali';html += `<tr><td>${htmlEscape(r.m.etiket||macEtiketi(r.m.hukOkul,r.m.muhOkul))}</td><td class="${kap?'jury-missing':'jury-ok'}">${kap?'KAPALI':'AÇIK'}</td><td>${r.total}</td><td>${r.tam}</td><td>${r.eksik}</td><td>${r.eksik?htmlEscape(r.eksikRoller.join(', ')):'—'}</td><td><button class="btn" style="padding:7px;margin:0;background:${kap?'#0f766e':'#b91c1c'}" onclick="macDurumuDegistir('${secimler.kategori}','${r.id}','${kap?'acik':'kapali'}',${r.eksik})">${kap?'Maçı Aç':'Maçı Kapat'}</button></td></tr>`;});
+        div.innerHTML=html+'</table>';
+    }
+
+    async function macDurumuDegistir(kategori, macId, yeniDurum, eksikSayisi=0) {
+        if (yeniDurum==='kapali' && eksikSayisi>0 && !confirm(`Bu maçta ${eksikSayisi} öğrenci için 3/3 jüri tamamlanmamış görünüyor. Yine de maç kapatılsın mı?`)) return;
+        const ref=db.ref(`maclar/${kategori}/${macId}`);
+        await ref.transaction(cur=>{cur=cur||{id:macId,kategori}; return {...cur,durum:yeniDurum,updatedAt:Date.now(),closedAt:yeniDurum==='kapali'?Date.now():null,version:(cur.version||0)+1};});
+        if (yeniDurum==='kapali') {
+            const s=await ref.once('value'); const m=s.val();
+            if(m?.hukOkul&&m?.muhOkul) await turnuvaAgacinaPuanYansit(kategori,m.hukOkul,m.muhOkul,true);
+        }
+    }
+
+    async function yedekVerisiniGetir(kategori) {
+        const [o,p,m,t]=await Promise.all([db.ref('okullar/'+kategori).once('value'),db.ref('puanlar/'+kategori).once('value'),db.ref('maclar/'+kategori).once('value'),db.ref('turnuva/'+kategori).once('value')]);
+        return {meta:{appVersion:APP_VERSION,kategori,createdAt:new Date().toISOString()},okullar:o.val()||{},puanlar:p.val()||{},maclar:m.val()||{},turnuva:t.val()||{}};
+    }
+
+    async function yedekJsonIndir() {
+        try { const data=await yedekVerisiniGetir(secimler.kategori); const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json;charset=utf-8'}); const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`Munazara_Yedek_${secimler.kategori}_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);} catch(err){alert('Yedek indirilemedi: '+(err?.message||err));}
+    }
+
+    async function firebaseArsivYedegiAl(sessiz=false, etiket='manuel') {
+        try { const data=await yedekVerisiniGetir(secimler.kategori); const key=`${Date.now()}_${etiket}`; await db.ref(`arsiv/tamYedek/${secimler.kategori}/${key}`).set(data); if(!sessiz)alert('Firebase arşiv yedeği oluşturuldu.'); } catch(err){if(!sessiz)alert('Arşiv yedeği oluşturulamadı: '+(err?.message||err));}
+    }
+
+    // --- ÖĞRENCİ YÖNETİMİ & EXCEL/CSV ---
     function renderOgrenci() {
+        dinleyicileriTemizle();
         document.getElementById('app').innerHTML = `
             <div class="card">
                 <h2>Okul ve Öğrenci Listeleri</h2>
@@ -692,461 +951,115 @@
                     <button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this, 'ORTAOKUL', 'ogrenci')">ORTAOKUL LİSTESİ</button>
                     <button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this, 'LİSE', 'ogrenci')">LİSE LİSTESİ</button>
                 </div>
-
                 <div class="file-upload-wrapper">
                     <div style="font-size:14px; font-weight:bold; margin-bottom:8px; color:var(--accent);">📁 Toplu Okul/Öğrenci Yükleme (.xlsx / .csv)</div>
                     <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Sütunlar: <b>Okul Adı</b> ve <b>Öğrenci Ad Soyad</b>. Aktif Kategori: <b>${secimler.kategori}</b></div>
                     <input type="file" id="excelDosya" accept=".xlsx, .xls, .csv" style="padding:5px; background:transparent; border:none;">
                     <button class="btn" style="background:var(--success); border:none; margin-top:10px; padding:10px;" onclick="excelTopluYukle()">Dosyayı İşle ve Kaydet</button>
                 </div>
-
                 <div style="text-align:center; font-weight:bold; color:var(--text-muted); margin:15px 0;">Veya Tek Tek Ekle:</div>
                 <input type="text" id="okulAd" placeholder="Okul Adı">
                 <input type="text" id="ogrAd" placeholder="Öğrenci Ad Soyad">
                 <button class="btn" style="background:var(--primary); border:none;" onclick="ogrenciKaydet()">Öğrenci Kaydet</button>
-                
                 <div id="okulListesi" style="margin-top:25px;"></div>
                 <button class="btn" style="background:#475569" onclick="anaMenu()">← Ana Menü</button>
             </div>`;
-            
         okulListesiniYenile();
     }
 
-    // --- TÜRKÇE KARAKTER / EXCEL-CSV KODLAMA YARDIMCILARI ---
     function turkceMetinDuzelt(deger) {
-        let s = String(deger ?? '')
-            .replace(/^\uFEFF/, '')
-            .replace(/\u00A0/g, ' ')
-            .normalize('NFC')
-            .trim();
-
-        // UTF-8 metnin Windows-1252/ISO-8859 türevleriyle yanlış çözülmesinden
-        // doğan yaygın "mojibake" karakterlerini düzeltir.
-        const bozukKarakterler = {
-            'Ã§':'ç', 'Ã‡':'Ç', 'ÄŸ':'ğ', 'Äž':'Ğ', 'Ä±':'ı', 'Ä°':'İ',
-            'Ã¶':'ö', 'Ã–':'Ö', 'ÅŸ':'ş', 'Åž':'Ş', 'Ã¼':'ü', 'Ãœ':'Ü',
-            'â€™':'’', 'â€œ':'“', 'â€':'”', 'â€“':'–', 'â€”':'—', 'Â':'',
-            'ï»¿':''
-        };
-        for (const [bozuk, dogru] of Object.entries(bozukKarakterler)) {
-            s = s.split(bozuk).join(dogru);
-        }
+        let s=String(deger??'').replace(/^\uFEFF/,'').replace(/\u00A0/g,' ').normalize('NFC').trim();
+        const bozukKarakterler={'Ã§':'ç','Ã‡':'Ç','ÄŸ':'ğ','Äž':'Ğ','Ä±':'ı','Ä°':'İ','Ã¶':'ö','Ã–':'Ö','ÅŸ':'ş','Åž':'Ş','Ã¼':'ü','Ãœ':'Ü','â€™':'’','â€œ':'“','â€':'”','â€“':'–','â€”':'—','Â':'','ï»¿':''};
+        for(const [bozuk,dogru] of Object.entries(bozukKarakterler)) s=s.split(bozuk).join(dogru);
         return s.normalize('NFC').trim();
     }
 
     function csvBufferCoz(buffer) {
-        const bytes = new Uint8Array(buffer);
-
-        // BOM varsa doğrudan doğru kodlamayı kullan.
-        if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
-            return { text: new TextDecoder('utf-8').decode(bytes), encoding: 'UTF-8 BOM' };
-        }
-        if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
-            return { text: new TextDecoder('utf-16le').decode(bytes), encoding: 'UTF-16 LE' };
-        }
-        if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
-            return { text: new TextDecoder('utf-16be').decode(bytes), encoding: 'UTF-16 BE' };
-        }
-
-        // Önce gerçek UTF-8 dene. Hatalı byte varsa Windows-1254'e düş.
-        try {
-            return {
-                text: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
-                encoding: 'UTF-8'
-            };
-        } catch (_) {
-            try {
-                return {
-                    text: new TextDecoder('windows-1254').decode(bytes),
-                    encoding: 'Windows-1254'
-                };
-            } catch (_) {
-                return {
-                    text: new TextDecoder('iso-8859-9').decode(bytes),
-                    encoding: 'ISO-8859-9'
-                };
-            }
-        }
+        const bytes=new Uint8Array(buffer);
+        if(bytes.length>=3&&bytes[0]===0xEF&&bytes[1]===0xBB&&bytes[2]===0xBF)return{text:new TextDecoder('utf-8').decode(bytes),encoding:'UTF-8 BOM'};
+        if(bytes.length>=2&&bytes[0]===0xFF&&bytes[1]===0xFE)return{text:new TextDecoder('utf-16le').decode(bytes),encoding:'UTF-16 LE'};
+        if(bytes.length>=2&&bytes[0]===0xFE&&bytes[1]===0xFF)return{text:new TextDecoder('utf-16be').decode(bytes),encoding:'UTF-16 BE'};
+        try{return{text:new TextDecoder('utf-8',{fatal:true}).decode(bytes),encoding:'UTF-8'};}catch(_){try{return{text:new TextDecoder('windows-1254').decode(bytes),encoding:'Windows-1254'};}catch(_){return{text:new TextDecoder('iso-8859-9').decode(bytes),encoding:'ISO-8859-9'};}}
     }
 
-    function firebaseKeyTemizle(isim) {
-        // Önce Unicode'u normalize et; sonra Firebase yolunda yasak karakterleri temizle.
-        // Türkçe karakterler (ÇĞİÖŞÜ / çğıöşü) Firebase anahtarlarında korunur.
-        return turkceMetinDuzelt(isim).replace(/[\.\#\$\/\[\]]/g, '').trim();
-    }
+    function firebaseKeyTemizle(isim) { return turkceMetinDuzelt(isim).replace(/[\.\#\$\/\[\]]/g,'').trim(); }
 
     async function excelTopluYukle() {
-        let fileInput = document.getElementById('excelDosya');
-        if(!fileInput.files.length) return alert("Lütfen bir Excel (.xlsx) veya CSV dosyası seçin!");
-
-        let file = fileInput.files[0];
-        let reader = new FileReader();
-
-        reader.onload = async function(e) {
-            try {
-                const buffer = e.target.result;
-                const ad = (file.name || '').toLocaleLowerCase('tr-TR');
-                let workbook;
-                let algilananKodlama = '';
-
-                if (ad.endsWith('.csv')) {
-                    const sonuc = csvBufferCoz(buffer);
-                    algilananKodlama = sonuc.encoding;
-                    workbook = XLSX.read(sonuc.text, { type: 'string', raw: false });
-                } else {
-                    // XLSX/XLS dosyaları Unicode'u doğal olarak taşır.
-                    workbook = XLSX.read(buffer, { type: 'array', cellText: true, cellDates: true });
-                }
-
-                if (!workbook.SheetNames || !workbook.SheetNames.length) {
-                    throw new Error('Dosyada çalışma sayfası bulunamadı.');
-                }
-
-                let firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                let rows = XLSX.utils.sheet_to_json(firstSheet, {
-                    header: 1,
-                    raw: false,
-                    defval: ''
-                });
-
-                const yazmaIslemleri = [];
-                let yuklemeSayisi = 0;
-                let atlananSayisi = 0;
-
-                for (let i = 1; i < rows.length; i++) {
-                    let row = rows[i];
-                    if (!row || row.length === 0) continue;
-
-                    let schoolRaw = turkceMetinDuzelt(row[0]);
-                    let student = turkceMetinDuzelt(row[1]);
-                    let schoolName = firebaseKeyTemizle(schoolRaw);
-
-                    if (schoolName && student && schoolName.toLocaleLowerCase('tr-TR') !== 'okul adı') {
-                        yazmaIslemleri.push(
-                            db.ref('okullar/' + secimler.kategori + '/' + schoolName).push(student)
-                        );
-                        yuklemeSayisi++;
-                    } else if (schoolRaw || student) {
-                        atlananSayisi++;
-                    }
-                }
-
-                if (yuklemeSayisi > 0) {
-                    // Firebase yazmaları bitmeden "başarılı" demeyelim.
-                    await Promise.all(yazmaIslemleri);
-
-                    let ekBilgi = algilananKodlama ? `\nCSV kodlaması: ${algilananKodlama}` : '';
-                    if (atlananSayisi) ekBilgi += `\nAtlanan satır: ${atlananSayisi}`;
-                    alert(`${yuklemeSayisi} adet öğrenci (${secimler.kategori}) listesine başarıyla aktarıldı!${ekBilgi}`);
-                    fileInput.value = '';
-                    okulListesiniYenile();
-                } else {
-                    alert("Yüklenecek kayıt bulunamadı. Sütunların 'Okul Adı' ve 'Öğrenci Ad Soyad' sırasıyla geldiğini kontrol edin.");
-                }
-            } catch (err) {
-                console.error('Excel/CSV aktarım hatası:', err);
-                alert("Dosya okunurken bir hata oluştu: " + (err?.message || err));
-            }
-        };
-
-        reader.onerror = function() {
-            alert("Dosya tarayıcı tarafından okunamadı.");
-        };
-
-        reader.readAsArrayBuffer(file);
+        const fileInput=document.getElementById('excelDosya'); if(!fileInput.files.length)return alert('Lütfen bir Excel (.xlsx) veya CSV dosyası seçin!');
+        const file=fileInput.files[0]; const reader=new FileReader();
+        reader.onload=async function(e){try{const buffer=e.target.result;const ad=(file.name||'').toLocaleLowerCase('tr-TR');let workbook,algilananKodlama='';if(ad.endsWith('.csv')){const sonuc=csvBufferCoz(buffer);algilananKodlama=sonuc.encoding;workbook=XLSX.read(sonuc.text,{type:'string',raw:false});}else workbook=XLSX.read(buffer,{type:'array',cellText:true,cellDates:true});if(!workbook.SheetNames?.length)throw new Error('Dosyada çalışma sayfası bulunamadı.');const rows=XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]],{header:1,raw:false,defval:''});const yazmaIslemleri=[];let yuklemeSayisi=0,atlananSayisi=0;for(let i=1;i<rows.length;i++){const row=rows[i];if(!row||!row.length)continue;const schoolRaw=turkceMetinDuzelt(row[0]),student=turkceMetinDuzelt(row[1]),schoolName=firebaseKeyTemizle(schoolRaw);if(schoolName&&student&&schoolName.toLocaleLowerCase('tr-TR')!=='okul adı'){yazmaIslemleri.push(db.ref('okullar/'+secimler.kategori+'/'+schoolName).push(student));yuklemeSayisi++;}else if(schoolRaw||student)atlananSayisi++;}if(yuklemeSayisi){await Promise.all(yazmaIslemleri);let ekBilgi=algilananKodlama?`\nCSV kodlaması: ${algilananKodlama}`:'';if(atlananSayisi)ekBilgi+=`\nAtlanan satır: ${atlananSayisi}`;alert(`${yuklemeSayisi} adet öğrenci (${secimler.kategori}) listesine başarıyla aktarıldı!${ekBilgi}`);fileInput.value='';okulListesiniYenile();}else alert("Yüklenecek kayıt bulunamadı. Sütunların 'Okul Adı' ve 'Öğrenci Ad Soyad' sırasıyla geldiğini kontrol edin.");}catch(err){console.error('Excel/CSV aktarım hatası:',err);alert('Dosya okunurken bir hata oluştu: '+(err?.message||err));}};
+        reader.onerror=()=>alert('Dosya tarayıcı tarafından okunamadı.'); reader.readAsArrayBuffer(file);
     }
 
     function okulListesiniYenile() {
-        db.ref('okullar/' + secimler.kategori).once('value', (s) => {
-            let l = document.getElementById('okulListesi'); 
-            if(!l) return;
-            l.innerHTML = "";
-            s.forEach((o) => {
-                l.innerHTML += `
-                    <div style="margin-bottom:10px;">
-                        <button class="btn" style="background:#1e293b; text-align:left; border-left: 4px solid var(--primary); margin:0;" onclick="togg('${o.key}')">🏫 ${o.key}</button>
-                        <div id="list-${o.key}" style="display:none; padding:12px; background:#111827; border:1px solid var(--border-color); border-radius:0 0 10px 10px;"></div>
-                    </div>`;
-            });
-        });
+        db.ref('okullar/'+secimler.kategori).once('value',s=>{const l=document.getElementById('okulListesi');if(!l)return;l.innerHTML='';s.forEach(o=>{const wrap=document.createElement('div');wrap.style.marginBottom='10px';const btn=document.createElement('button');btn.className='btn';btn.style='background:#1e293b;text-align:left;border-left:4px solid var(--primary);margin:0;';btn.textContent='🏫 '+o.key;const inner=document.createElement('div');inner.id='list-'+hash32(o.key);inner.style='display:none;padding:12px;background:#111827;border:1px solid var(--border-color);border-radius:0 0 10px 10px;';btn.onclick=()=>togg(o.key,inner);wrap.append(btn,inner);l.appendChild(wrap);});});
     }
 
-    function ogrenciKaydet() {
-        let school = turkceMetinDuzelt(document.getElementById('okulAd').value);
-        let student = turkceMetinDuzelt(document.getElementById('ogrAd').value);
-        if(!school || !student) return alert("Lütfen alanları boş bırakmayın!");
+    function ogrenciKaydet() { const school=turkceMetinDuzelt(document.getElementById('okulAd').value),student=turkceMetinDuzelt(document.getElementById('ogrAd').value);if(!school||!student)return alert('Lütfen alanları boş bırakmayın!');const temizOkul=firebaseKeyTemizle(school);db.ref(`okullar/${secimler.kategori}/${temizOkul}`).push(student).then(()=>{alert('Öğrenci başarıyla veritabanına kaydedildi!');document.getElementById('ogrAd').value='';okulListesiniYenile();}).catch(err=>alert('Öğrenci kaydedilemedi: '+(err?.message||err))); }
+    function togg(o,d) { const durum=d.style.display;document.querySelectorAll('[id^="list-"]').forEach(el=>el.style.display='none');if(durum==='none'){d.style.display='block';ogrenciListesiniDoldur(o,d);} }
+    function ogrenciListesiniDoldur(o,divElement){db.ref('okullar/'+secimler.kategori+'/'+o).once('value',s=>{divElement.innerHTML='';s.forEach(ogr=>{const row=document.createElement('div');row.style='padding:6px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1f2937;';const span=document.createElement('span');span.textContent='👤 '+ogr.val();const b=document.createElement('button');b.style='background:#ef4444;color:white;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-weight:bold;';b.textContent='Sil';b.onclick=()=>ogrenciSil(o,ogr.key,divElement);row.append(span,b);divElement.appendChild(row);});const del=document.createElement('button');del.className='btn';del.style='background:#b91c1c;border:none;margin-top:12px;font-size:13px;padding:8px;';del.textContent='❌ Okulu ve Tüm Öğrencileri Sil';del.onclick=()=>okulKompleSil(o);divElement.appendChild(del);});}
+    function ogrenciSil(okulAd,ogrKey,divElement){if(confirm('Bu öğrenciyi silmek istediğinize emin misiniz?'))db.ref(`okullar/${secimler.kategori}/${okulAd}/${ogrKey}`).remove().then(()=>ogrenciListesiniDoldur(okulAd,divElement));}
+    function okulKompleSil(okulAd){if(confirm(`${okulAd} okulunu ve tüm öğrencilerini listeden tamamen silmek istediğinize emin misiniz?`))db.ref(`okullar/${secimler.kategori}/${okulAd}`).remove().then(()=>{alert('Okul tamamen temizlendi.');okulListesiniYenile();});}
 
-        let temizOkul = firebaseKeyTemizle(school);
-        db.ref('okullar/' + secimler.kategori + '/' + temizOkul).push(student).then(() => {
-            alert("Öğrenci başarıyla veritabanına kaydedildi!");
-            document.getElementById('ogrAd').value = "";
-            okulListesiniYenile();
-        }).catch((err) => {
-            console.error('Öğrenci kaydetme hatası:', err);
-            alert("Öğrenci kaydedilemedi: " + (err?.message || err));
-        });
-    }
+    // --- FIREBASE MERKEZLİ TURNUVA AĞACI ---
+    function turnuvaRef(kategori=secimler.kategori){return db.ref('turnuva/'+kategori);}
 
-    function togg(o) {
-        let d = document.getElementById('list-'+o); 
-        if(!d) return;
-        let durum = d.style.display;
-        
-        document.querySelectorAll('[id^="list-"]').forEach(el => el.style.display = 'none');
-        
-        if(durum === 'none') {
-            d.style.display = 'block';
-            ogrenciListesiniDoldur(o, d);
-        }
-    }
+    function roundOlustur(kategori,turNo,takimlar){const matches={};for(let i=0;i<takimlar.length;i+=2){const t1=takimlar[i]||'BYE',t2=takimlar[i+1]||'BYE';const key='m'+(i/2);const bye=t2==='BYE';matches[key]={key,index:i,macId:bye?`bye_${turNo}_${i}_${hash32(t1)}`:macKimligiOlustur(kategori,t1,t2),team1:t1,team2:t2,score1:null,score2:null,winner:bye?t1:'',provisionalWinner:'',status:bye?'bye':'open',updatedAt:Date.now()};}return{turNo,createdAt:Date.now(),matches};}
 
-    function ogrenciListesiniDoldur(o, divElement) {
-        db.ref('okullar/' + secimler.kategori + '/' + o).once('value', (s) => {
-            divElement.innerHTML = ""; 
-            s.forEach(ogr => {
-                divElement.innerHTML += `
-                    <div style="padding:6px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #1f2937;">
-                        <span>👤 ${ogr.val()}</span> 
-                        <button style="background:#ef4444; color:white; border:none; border-radius:6px; padding:4px 12px; cursor:pointer; font-weight:bold;" onclick="ogrenciSil('${o}', '${ogr.key}')">Sil</button>
-                    </div>`;
-            });
-            divElement.innerHTML += `
-                <button class="btn" style="background:#b91c1c; border:none; margin-top:12px; font-size:13px; padding:8px;" onclick="okulKompleSil('${o}')">❌ Okulu ve Tüm Öğrencileri Sil</button>
-            `;
-        });
-    }
+    async function roundMaclariniKaydet(kategori,round){if(!round?.matches)return;for(const m of Object.values(round.matches)){if(m.team2==='BYE')continue;await ensureMatchExists(kategori,m.team1,m.team2);}}
 
-    function ogrenciSil(okulAd, ogrKey) {
-        if(confirm("Bu öğrenciyi silmek istediğinize emin misiniz?")) {
-            db.ref(`okullar/${secimler.kategori}/${okulAd}/${ogrKey}`).remove().then(() => {
-                let d = document.getElementById('list-'+okulAd);
-                ogrenciListesiniDoldur(okulAd, d);
-            });
-        }
-    }
-
-    function okulKompleSil(okulAd) {
-        if(confirm(`${okulAd} okulunu ve tüm öğrencilerini listeden tamamen silmek istediğinize emin misiniz?`)) {
-            db.ref(`okullar/${secimler.kategori}/${okulAd}`).remove().then(() => {
-                alert("Okul tamamen temizlendi.");
-                okulListesiniYenile();
-            });
-        }
-    }
-
-    // --- TURNUVA AĞACI ---
     function renderTurnuva() {
-        document.getElementById('app').innerHTML = `
-            <div class="card">
-                <h2>Turnuva Ağacı Finalleri</h2>
-                <div class="btn-grid" style="grid-template-columns: 1fr 1fr; margin-bottom:20px;">
-                    <button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this, 'ORTAOKUL', 'turnuva')">ORTAOKUL AĞACI</button>
-                    <button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this, 'LİSE', 'turnuva')">LİSE AĞACI</button>
-                </div>
-                
-                <div style="margin-bottom:15px; font-size:14px; color:var(--text-muted);">
-                    💡 <b>Mevcut Okul Durumu:</b> Öğrenci listesine eklediğiniz okullar aşağıda listelenmiştir. "Turnuvayı Başlat" dediğinizde sistem bunları otomatik <b>rastgele eşleştirecektir</b>.
-                </div>
+        dinleyicileriTemizle();
+        document.getElementById('app').innerHTML=`
+            <div class="card" style="max-width:1050px;">
+                <h2>Turnuva Ağacı Finalleri · Merkezi</h2>
+                <div class="btn-grid" style="grid-template-columns:1fr 1fr;margin-bottom:20px;"><button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this,'ORTAOKUL','turnuva')">ORTAOKUL AĞACI</button><button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this,'LİSE','turnuva')">LİSE AĞACI</button></div>
+                <div style="margin-bottom:15px;font-size:14px;color:var(--text-muted);">Turnuva ağacı artık Firebase'de tutulur; aynı yönetici ekranı farklı cihazlarda aynı durumu görür. Değişiklikler transaction ile çakışmaya karşı korunur.</div>
                 <textarea id="takimlar" style="height:100px;" placeholder="Sistemde kayıtlı okul aranıyor..." readonly></textarea>
-                
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                    <button class="btn" style="background:var(--primary); border:none;" onclick="ilkTuruKur()">🎲 Turnuvayı Başlat (Rastgele Eşleştir)</button>
-                    <button class="btn" style="background:#ef4444; border:none;" onclick="turnuvayiSifirla()">Turnuvayı Sıfırlat</button>
-                </div>
-                <div id="sampiyonAlani"></div>
-                <div id="aktif-tur-container"></div>
-                <button class="btn" id="nextTurBtn" style="display:none; background:var(--success); border:none; margin-top:25px; padding:16px;" onclick="yeniTur()">Kalanlarla Üst Turu Kur</button>
-                <div id="gecmis-turlar"></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button class="btn" style="background:var(--primary);border:none;" onclick="ilkTuruKur()">🎲 Turnuvayı Başlat / Yeniden Kur</button><button class="btn" style="background:#ef4444;border:none;" onclick="turnuvayiSifirla()">Turnuvayı Sıfırla</button></div>
+                <div id="turnuvaRevision" style="font-size:11px;color:var(--text-muted);margin:8px 0;"></div>
+                <div id="sampiyonAlani"></div><div id="aktif-tur-container"></div><button class="btn" id="nextTurBtn" style="display:none;background:var(--success);border:none;margin-top:25px;padding:16px;" onclick="yeniTur()">Kalanlarla Üst Turu Kur</button><div id="gecmis-turlar"></div>
                 <button class="btn" style="background:#475569" onclick="anaMenu()">← Ana Menü</button>
             </div>`;
-        
-        let hafizaAnahtari = 'turnuvaData_' + secimler.kategori;
-        let localData = JSON.parse(localStorage.getItem(hafizaAnahtari)) || { kazananlarMap: {}, toplamMacSayisi: 0, turSayaci: 1, aktifHtml: "", gecmisHtml: "", sampiyonHtml: "", takimlarMetni: "" };
-        
-        db.ref('okullar/' + secimler.kategori).once('value', (s) => {
-            let okullarDizisi = [];
-            s.forEach(o => { okullarDizisi.push(o.key); });
-            let metin = okullarDizisi.join('\n');
-            
-            if(!localData.aktifHtml) {
-                document.getElementById('takimlar').value = metin;
-                localData.takimlarMetni = metin;
-                hafizayaKaydet(localData);
-            } else {
-                document.getElementById('takimlar').value = localData.takimlarMetni || metin;
-            }
-        });
-        
-        if(localData.aktifHtml) {
-            document.getElementById('aktif-tur-container').innerHTML = localData.aktifHtml;
-            document.getElementById('gecmis-turlar').innerHTML = localData.gecmisHtml;
-            document.getElementById('sampiyonAlani').innerHTML = localData.sampiyonHtml;
-            
-            Object.keys(localData.kazananlarMap).forEach(key => {
-                let s1 = localData.kazananlarMap[key + "_s1"];
-                let s2 = localData.kazananlarMap[key + "_s2"];
-                let i1 = document.getElementById(`skor-${localData.turSayaci}-${key}-1`);
-                let i2 = document.getElementById(`skor-${localData.turSayaci}-${key}-2`);
-                if(i1 && s1 !== undefined) i1.value = s1;
-                if(i2 && s2 !== undefined) i2.value = s2;
-            });
-        }
+        db.ref('okullar/'+secimler.kategori).once('value',s=>{const arr=[];s.forEach(o=>arr.push(o.key));const ta=document.getElementById('takimlar');if(ta)ta.value=arr.join('\n');});
+        aktifTurnuvaRef=turnuvaRef();
+        aktifTurnuvaRef.on('value',s=>{const state=s.val();if(state)localStorage.setItem(TURN_CACHE_PREFIX+secimler.kategori,JSON.stringify(state));renderTurnuvaState(state);},err=>{console.error(err);try{renderTurnuvaState(JSON.parse(localStorage.getItem(TURN_CACHE_PREFIX+secimler.kategori)||'null'));}catch(_){}});
     }
 
-    function turnuvayiSifirla() {
-        if(confirm(secimler.kategori + " turnuva ilerlemesini tamamen silmek istediğinize emin misiniz?")) {
-            localStorage.removeItem('turnuvaData_' + secimler.kategori);
-            renderTurnuva();
-        }
+    function renderTurnuvaState(state){const rev=document.getElementById('turnuvaRevision'),act=document.getElementById('aktif-tur-container'),old=document.getElementById('gecmis-turlar'),champ=document.getElementById('sampiyonAlani'),next=document.getElementById('nextTurBtn');if(!act||!old||!champ||!next)return;if(!state){act.innerHTML='<div class="kriter-card" style="text-align:center;color:var(--text-muted);">Henüz merkezi turnuva ağacı oluşturulmadı.</div>';old.innerHTML='';champ.innerHTML='';next.style.display='none';if(rev)rev.textContent='';return;}if(rev)rev.textContent=`Revizyon: ${state.revision||0} · Son güncelleme: ${state.updatedAt?new Date(state.updatedAt).toLocaleString('tr-TR'):'-'}`;const cr=Number(state.currentRound||1);const r=state.rounds?.['r'+cr];act.innerHTML=`<h3 style="color:var(--text-main);font-size:20px;border-left:4px solid var(--accent);padding-left:8px;">Aktif Tur: ${cr}. Eleme Eşleşmeleri</h3>`;const winners=[];Object.entries(r?.matches||{}).forEach(([mk,m])=>{if(m.winner)winners.push(m.winner);if(m.team2==='BYE'){act.innerHTML += `<div class="match-box" style="border-color:var(--success);"><b style="color:var(--success);">${htmlEscape(m.team1)}</b><br><span style="color:var(--text-muted);font-size:12px;">vs</span><br><b>BYE</b><div class="win-tag">Otomatik Tur Atladı</div></div>`;return;}const status=m.winner?`<div class="win-tag">Kazanan: ${htmlEscape(m.winner)}</div>`:(m.provisionalWinner?`<div class="win-tag" style="background:#78350f;color:#fde68a;border-color:#92400e;">Geçici üstün: ${htmlEscape(m.provisionalWinner)} · Maçı kapatınca kesinleşir</div>`:'');act.innerHTML += `<div class="match-box"><div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">${htmlEscape(m.macId)}</div><div class="match-team" style="border-bottom:1px solid #1f2937;padding-bottom:6px;"><span><b>${htmlEscape(m.team1)}</b></span><input type="number" class="skor-input" id="ts-${cr}-${mk}-1" value="${m.score1??''}" onchange="turnuvaManuelSkorKaydet('${'r'+cr}','${mk}')"></div><div style="text-align:center;margin:4px 0;font-size:11px;color:var(--text-muted);font-weight:bold;letter-spacing:1px;">VS</div><div class="match-team" style="border-top:1px solid #1f2937;padding-top:6px;"><span><b>${htmlEscape(m.team2)}</b></span><input type="number" class="skor-input" id="ts-${cr}-${mk}-2" value="${m.score2??''}" onchange="turnuvaManuelSkorKaydet('${'r'+cr}','${mk}')"></div>${status}</div>`;});
+        const matchCount=Object.keys(r?.matches||{}).length;const tamam=matchCount>0&&Object.values(r.matches).every(m=>!!m.winner);if(state.champion){champ.innerHTML=`<div class="champ-card">🏆 ${htmlEscape(secimler.kategori)} ŞAMPİYONU: ${htmlEscape(state.champion)} 🏆</div>`;next.style.display='none';}else{champ.innerHTML='';next.style.display=tamam?'block':'none';}
+        old.innerHTML='';for(let n=cr-1;n>=1;n--){const rr=state.rounds?.['r'+n];if(!rr)continue;let h=`<div class="old-tur"><h4 style="color:var(--text-muted);margin-bottom:10px;">${n}. Tur Sonuç Arşivi</h4>`;Object.values(rr.matches||{}).forEach(m=>{h += `<div class="match-box" style="opacity:.75;"><div>${htmlEscape(m.team1)} <span style="color:var(--accent);">(${m.score1??'-'})</span></div><div>${htmlEscape(m.team2)} <span style="color:var(--accent);">(${m.score2??'-'})</span></div><div style="font-size:11px;color:var(--success);margin-top:5px;font-weight:bold;">→ ${htmlEscape(m.winner||'Sonuç yok')}</div></div>`;});old.innerHTML += h+'</div>';}
     }
 
-    function hafizayaKaydet(dataObj) {
-        localStorage.setItem('turnuvaData_' + secimler.kategori, JSON.stringify(dataObj));
-    }
+    async function ilkTuruKur(){const ta=document.getElementById('takimlar');let t=(ta?.value||'').split('\n').map(x=>x.trim()).filter(Boolean);if(t.length<2)return alert('Turnuvayı başlatmak için en az 2 okul bulunmalıdır!');const current=await turnuvaRef().once('value');if(current.exists()&&!confirm('Mevcut merkezi turnuva ağacı var. Yeni turnuva kurarsanız mevcut ağaç arşivlenip yenisi oluşturulacak. Devam edilsin mi?'))return;if(current.exists())await db.ref(`arsiv/turnuva/${secimler.kategori}/${Date.now()}`).set(current.val());t=t.map(x=>({x,r:Math.random()})).sort((a,b)=>a.r-b.r).map(o=>o.x);const round=roundOlustur(secimler.kategori,1,t);const state={version:3,revision:(current.val()?.revision||0)+1,status:'active',currentRound:1,rounds:{r1:round},champion:'',teams:t,createdAt:Date.now(),updatedAt:Date.now()};await turnuvaRef().set(state);await roundMaclariniKaydet(secimler.kategori,round);firebaseArsivYedegiAl(true,'turnuva_baslangic');}
 
-    function ilkTuruKur() {
-        let t = document.getElementById('takimlar').value.split('\n').filter(x => x.trim());
-        if(t.length < 2) return alert("Turnuvayı başlatmak için sistemde en az 2 okul bulunmalıdır!");
-        
-        t.sort(() => Math.random() - 0.5);
-        
-        let localData = { kazananlarMap: {}, toplamMacSayisi: 0, turSayaci: 1, aktifHtml: "", gecmisHtml: "", sampiyonHtml: "", takimlarMetni: t.join('\n') };
-        hafizayaKaydet(localData);
-        turKur(t, localData);
-    }
+    async function turnuvaManuelSkorKaydet(roundKey,matchKey){const stateSnap=await turnuvaRef().once('value');const cur=stateSnap.val();const turNo=Number(roundKey.replace('r',''));const s1=parseFloat(document.getElementById(`ts-${turNo}-${matchKey}-1`)?.value),s2=parseFloat(document.getElementById(`ts-${turNo}-${matchKey}-2`)?.value);await turnuvaRef().transaction(state=>{if(!state?.rounds?.[roundKey]?.matches?.[matchKey])return state;const m=state.rounds[roundKey].matches[matchKey];m.score1=Number.isFinite(s1)?s1:null;m.score2=Number.isFinite(s2)?s2:null;m.provisionalWinner='';m.winner='';if(Number.isFinite(s1)&&Number.isFinite(s2)){if(s1>s2)m.winner=m.team1;else if(s2>s1)m.winner=m.team2;}m.updatedAt=Date.now();state.revision=(state.revision||0)+1;state.updatedAt=Date.now();return state;});}
 
-    function turKur(takimListesi, localData) {
-        localData.toplamMacSayisi = 0;
-        let cont = document.getElementById('aktif-tur-container');
-        if(!cont) return;
-        cont.innerHTML = `<h3 style="color:var(--text-main); font-size:20px; border-left:4px solid var(--accent); padding-left:8px;">Aktif Tur: ${localData.turSayaci}. Eleme Eşleşmeleri</h3>`;
-        
-        for(let i=0; i<takimListesi.length; i+=2) {
-            let t1 = takimListesi[i] || 'BYE', t2 = takimListesi[i+1] || 'BYE';
-            localData.toplamMacSayisi++;
-            
-            if(t2 === 'BYE') {
-                cont.innerHTML += `<div class="match-box" style="border-color:var(--success);"><b style="color:var(--success);">${t1}</b> <br><span style="color:var(--text-muted); font-size:12px;">vs</span><br> <b>${t2}</b><br><div class="win-tag">Otomatik Tur Atladı</div></div>`;
-                localData.kazananlarMap[i] = t1;
-            } else {
-                cont.innerHTML += `
-                    <div class="match-box" id="box-${localData.turSayaci}-${i}">
-                        <div class="match-team" style="border-bottom: 1px solid #1f2937; padding-bottom:6px;">
-                            <span><b>${t1}</b></span> <input type="number" class="skor-input" placeholder="0" id="skor-${localData.turSayaci}-${i}-1" oninput="otomatikSkorKontrol('${t1}', '${t2}', ${i})">
-                        </div>
-                        <div style="text-align:center; margin: 4px 0; font-size:11px; color:var(--text-muted); font-weight:bold; letter-spacing:1px;">VS</div>
-                        <div class="match-team" style="border-top: 1px solid #1f2937; padding-top:6px;">
-                            <span><b>${t2}</b></span> <input type="number" class="skor-input" placeholder="0" id="skor-${localData.turSayaci}-${i}-2" oninput="otomatikSkorKontrol('${t1}', '${t2}', ${i})">
-                        </div>
-                        <div id="status-${localData.turSayaci}-${i}"></div>
-                    </div>`;
-            }
-        }
-        hafizayaKaydet(localData);
-        kontrolEtVeButonGoster();
-    }
+    async function turnuvaAgacinaPuanYansit(kat,hukOkul,muhOkul,forceFinalize=false){if(!hukOkul||!muhOkul)return;const id=macKimligiOlustur(kat,hukOkul,muhOkul);const [s,mSnap]=await Promise.all([db.ref('puanlar/'+kat).once('value'),db.ref(`maclar/${kat}/${id}`).once('value')]);let tHuk=0,tMuh=0;const kayitlar=snapshotKayitlariniTekillestir(s);kayitlar.forEach(v=>{if(kayitMacId(v)===id){const toplam=puanToplami(v);if(v.secim.okul===hukOkul)tHuk+=toplam;if(v.secim.okul===muhOkul)tMuh+=toplam;}});const finalize=forceFinalize||mSnap.val()?.durum==='kapali';await turnuvaRef(kat).transaction(state=>{if(!state?.rounds)return state;for(const rr of Object.values(state.rounds)){for(const m of Object.values(rr.matches||{})){if(m.macId===id){m.score1=tHuk;m.score2=tMuh;m.provisionalWinner=tHuk>tMuh?hukOkul:(tMuh>tHuk?muhOkul:'');if(finalize)m.winner=m.provisionalWinner;else if(!m.winner)m.winner='';m.updatedAt=Date.now();}}}state.revision=(state.revision||0)+1;state.updatedAt=Date.now();return state;});}
 
-    function otomatikSkorKontrol(t1, t2, index) {
-        let hafizaAnahtari = 'turnuvaData_' + secimler.kategori;
-        let localData = JSON.parse(localStorage.getItem(hafizaAnahtari));
-        
-        let s1 = parseFloat(document.getElementById(`skor-${localData.turSayaci}-${index}-1`).value);
-        let s2 = parseFloat(document.getElementById(`skor-${localData.turSayaci}-${index}-2`).value);
-        let statusDiv = document.getElementById(`status-${localData.turSayaci}-${index}`);
+    async function yeniTur(){let olusanRound=null;await turnuvaRef().transaction(state=>{if(!state?.rounds)return state;const cr=Number(state.currentRound||1),r=state.rounds['r'+cr];if(!r)return state;const matches=Object.values(r.matches||{});if(!matches.length||!matches.every(m=>!!m.winner))return state;const winners=matches.map(m=>m.winner);if(winners.length===1){state.champion=winners[0];state.status='completed';state.revision=(state.revision||0)+1;state.updatedAt=Date.now();return state;}const nextNo=cr+1;if(state.rounds['r'+nextNo])return state;olusanRound=roundOlustur(secimler.kategori,nextNo,winners);state.rounds['r'+nextNo]=olusanRound;state.currentRound=nextNo;state.revision=(state.revision||0)+1;state.updatedAt=Date.now();return state;});if(olusanRound)await roundMaclariniKaydet(secimler.kategori,olusanRound);await firebaseArsivYedegiAl(true,'tur_gecisi');}
 
-        if (isNaN(s1) || isNaN(s2)) {
-            delete localData.kazananlarMap[index];
-            delete localData.kazananlarMap[index + "_s1"];
-            delete localData.kazananlarMap[index + "_s2"];
-            if(statusDiv) statusDiv.innerHTML = "";
-            hafizayaKaydet(localData);
-            kontrolEtVeButonGoster();
-            return;
-        }
+    async function turnuvayiSifirla(){const cevap=prompt(`${secimler.kategori} turnuvasını merkezi veritabanından sıfırlamak için SIFIRLA yazınız:`);if(cevap!=='SIFIRLA')return;const snap=await turnuvaRef().once('value');if(snap.exists())await db.ref(`arsiv/turnuva/${secimler.kategori}/${Date.now()}`).set(snap.val());await turnuvaRef().remove();localStorage.removeItem(TURN_CACHE_PREFIX+secimler.kategori);alert('Turnuva ağacı arşivlendi ve sıfırlandı. Puan kayıtları silinmedi.');}
 
-        localData.kazananlarMap[index + "_s1"] = s1;
-        localData.kazananlarMap[index + "_s2"] = s2;
+    // Geriye dönük çağrılar için: artık Firebase cache'i kullanılır.
+    function hafizayaKaydet(dataObj){localStorage.setItem(TURN_CACHE_PREFIX+secimler.kategori,JSON.stringify(dataObj));}
+    function turKur(){/* V3'te roundOlustur + Firebase state kullanılır. */}
+    function otomatikSkorKontrol(){/* V3'te turnuvaManuelSkorKaydet kullanılır. */}
+    function kontrolEtVeButonGoster(){/* V3'te renderTurnuvaState hesaplar. */}
 
-        if (s1 > s2) {
-            localData.kazananlarMap[index] = t1;
-            if(statusDiv) statusDiv.innerHTML = `<div class="win-tag">Kazanan: ${t1}</div>`;
-        } else if (s2 > s1) {
-            localData.kazananlarMap[index] = t2;
-            if(statusDiv) statusDiv.innerHTML = `<div class="win-tag">Kazanan: ${t2}</div>`;
-        } else {
-            delete localData.kazananlarMap[index];
-            if(statusDiv) statusDiv.innerHTML = `<div class="win-tag" style="background:#475569; color:#cbd5e1; border-color:#475569;">Beraberlik</div>`;
-        }
-        hafizayaKaydet(localData);
-        kontrolEtVeButonGoster();
-    }
+    // --- BAŞLATMA ---
+    window.addEventListener('online',()=>{networkDurumunuGuncelle();offlineKuyruguGonder();});
+    window.addEventListener('offline',networkDurumunuGuncelle);
+    db.ref('.info/connected').on('value',s=>{firebaseBagli=s.val()===true;networkDurumunuGuncelle();if(firebaseBagli)offlineKuyruguGonder();});
+    setInterval(()=>offlineKuyruguGonder(),15000);
 
-    function kontrolEtVeButonGoster() {
-        let hafizaAnahtari = 'turnuvaData_' + secimler.kategori;
-        let localData = JSON.parse(localStorage.getItem(hafizaAnahtari));
-        if(!localData) return;
-
-        let filtrelenmisKazananlar = Object.keys(localData.kazananlarMap).filter(k => !k.includes("_")).map(k => localData.kazananlarMap[k]);
-        
-        if(filtrelenmisKazananlar.length >= localData.toplamMacSayisi) {
-            if(filtrelenmisKazananlar.length === 1) {
-                document.getElementById('sampiyonAlani').innerHTML = `<div class="champ-card">🏆 ${secimler.kategori} ŞAMPİYONU: ${filtrelenmisKazananlar[0]} 🏆</div>`;
-                document.getElementById('nextTurBtn').style.display = 'none';
-            } else {
-                document.getElementById('nextTurBtn').style.display = 'block';
-            }
-        } else {
-            document.getElementById('nextTurBtn').style.display = 'none';
-            document.getElementById('sampiyonAlani').innerHTML = "";
-        }
-        
-        localData.aktifHtml = document.getElementById('aktif-tur-container').innerHTML;
-        localData.gecmisHtml = document.getElementById('gecmis-turlar').innerHTML;
-        localData.sampiyonHtml = document.getElementById('sampiyonAlani').innerHTML;
-        localStorage.setItem(hafizaAnahtari, JSON.stringify(localData));
-    }
-
-    function yeniTur() {
-        let hafizaAnahtari = 'turnuvaData_' + secimler.kategori;
-        let localData = JSON.parse(localStorage.getItem(hafizaAnahtari));
-        
-        let gecmisCont = document.getElementById('gecmis-turlar');
-        let matchBoxes = document.getElementById('aktif-tur-container').querySelectorAll('.match-box');
-        let arsivHtml = `<h4 style="color:var(--text-muted); margin-bottom:10px;">${localData.turSayaci}. Tur Sonuç Arşivi</h4>`;
-        
-        matchBoxes.forEach(box => {
-            let inputs = box.querySelectorAll('input');
-            if(inputs.length === 2) {
-                let takım1 = box.querySelectorAll('b')[0].innerText;
-                let takım2 = box.querySelectorAll('b')[1].innerText;
-                let skor1 = inputs[0].value || '0';
-                let skor2 = inputs[1].value || '0';
-                let kazananIsim = parseFloat(skor1) > parseFloat(skor2) ? takım1 : takım2;
-                arsivHtml += `<div class="match-box" style="opacity:0.6; border-color:var(--border-color); background:#0f172a;">
-                                <div style="font-size:13px;">${takım1} <span style="color:var(--accent);">(${skor1})</span></div>
-                                <div style="font-size:13px;">${takım2} <span style="color:var(--accent);">(${skor2})</span></div>
-                                <div style="font-size:11px; color:var(--success); margin-top:5px; font-weight:bold;">→ Üst Tura Çıktı: ${kazananIsim}</div>
-                              </div>`;
-            } else {
-                arsivHtml += box.outerHTML;
-            }
-        });
-
-        gecmisCont.innerHTML = `<div class="old-tur">${arsivHtml}</div>` + gecmisCont.innerHTML;
-
-        let sonrakiTurTakimlari = Object.keys(localData.kazananlarMap).filter(k => !k.includes("_")).map(k => localData.kazananlarMap[k]);
-        
-        localData.kazananlarMap = {}; 
-        localData.turSayaci++;
-        document.getElementById('nextTurBtn').style.display = 'none';
-        
-        localStorage.setItem(hafizaAnahtari, JSON.stringify(localData));
-        turKur(sonrakiTurTakimlari, localData);
-    }
-
-    window.onload = function() {
+    window.onload=function(){
+        const oturum=juriOturumuGetir();
+        if(oturum){secimler.juri=oturum.juri;secimler.juriAd=oturum.ad;secimleriKaydet();}
+        networkDurumunuGuncelle();
         anaMenu();
     };
 </script>
+
 </body>
 </html>
