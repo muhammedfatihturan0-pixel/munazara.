@@ -1309,7 +1309,7 @@
                 </div>
                 <div id="liveMetrics" class="admin-summary-grid"></div>
                 <div class="kriter-card"><h3 style="margin-top:0;color:var(--text-main);">Maçlar ve 3/3 Jüri Durumu</h3>
-                  <div class="sure-hint">Tüm maçlarda <b>Resmî Sonuç / Fikstür Eşleştir</b> ekranı kullanılabilir. Okul adları farklıysa resmî <b>maç numarasını</b> seçip tarafları onaylayın; jüri puanları değişmeden gerekçeli sonuç kaydedilir. Eksik 3/3 kayıt normal kesinleştirmeyi engeller, ancak onaylı sonuç girişini engellemez. Resmî fikstürdeki mevcut farklı sonuçlar asla otomatik ezilmez.</div>
+                  <div class="sure-hint">Tüm maçlarda <b>Puan Gir / Sonucu Kesinleştir</b> ekranı kullanılabilir. Okul adları farklıysa resmî <b>maç numarasını</b> seçip tarafları onaylayın; jüri puanları değişmeden yönetici onaylı sonuç kaydedilir. Eksik 3/3 kayıt normal kesinleştirmeyi engeller, ancak onaylı sonuç girişini engellemez. Resmî fikstürdeki mevcut farklı sonuçlar asla otomatik ezilmez.</div>
                    <div class="live-filter-bar no-print"><input id="liveMatchSearch" placeholder="Maç numarası veya okul ara..." oninput="yoneticiTabloFiltresiniGuncelle()" aria-label="Maç ara"><label><input id="iptalGoster" type="checkbox" style="width:auto;margin:0 5px 0 0;" onchange="yoneticiTabloFiltresiniGuncelle()">İptal edilenleri göster</label></div>
                   <div id="liveMatches" style="overflow-x:auto;">Yükleniyor...</div></div>
                 <div id="sureModalHost" class="no-print"></div>
@@ -1801,13 +1801,12 @@
             } else if(iptal) actions+=but('↩ İptali Kaldır',`macIptaliniDegistir(${f},false)`,'#0f766e');
             else {
                 actions+=but('⏱ Öğrenci Süreleri',`sureModalAc(${f})`,'#0369a1',kap && !sureKapanmisMacKaydiIzni(r.m));
-                if(!kap)actions+=but('📋 Resmî Sonuç / Fikstür Eşleştir',`yoneticiManuelSonucEkraniAc(${f})`,'#0f766e');
+                if(!kap)actions+=but('✏ Puan Gir / Sonucu Kesinleştir',`yoneticiManuelSonucEkraniAc(${f})`,'#0f766e');
                 actions+=but(kap?'↩ Yeniden Aç':'✓ Standart Kesinleştir (3/3)',`macDurumuDegistir(${f},'${kap?'acik':'kapali'}')`,kap?'#0f766e':'#b91c1c');
                 if(!kap){
                     actions+=but('⚖ Hükmen Kapat',`macHukmenKapat(${f})`,'#a16207');
                     actions+=but('⛔ İki Okul da Gelmedi',`macCiftElemeIleKapat(${f})`,'#9f1239');
                     actions+=but('🛡 Yönetici Kararıyla Kapat',`yoneticiKarariylaKapat(${f})`,'#6d28d9');
-                    actions+=but('🧹 Deneme Puanlarını Temizle',`yoneticiMacPuanlariniTemizle(${f})`,'#92400e');
                     actions+=but('✕ Maçı İptal Et',`macIptaliniDegistir(${f},true)`,'#475569');
                     if(!r.m._sanal)actions+=but('🗑 Maç Kaydını Sil',`yoneticiMacKaydiniSil(${f})`,'#7f1d1d');
                 }
@@ -2512,36 +2511,36 @@
             const varsayilanH=denetim.ready?denetim.toplamlar[m.hukOkul]:'';
             const varsayilanM=denetim.ready?denetim.toplamlar[m.muhOkul]:'';
             const macBir=kategori===ACIL_MAC_1.kat&&macId===ACIL_MAC_1.id;
-            const ph=macBir&&!denetim.ready?ACIL_MAC_1.beklenenHuk:varsayilanH;
-            const pm=macBir&&!denetim.ready?ACIL_MAC_1.beklenenMuh:varsayilanM;
+            const ph=varsayilanH;
+            const pm=varsayilanM;
             const puanKatsayi=puanlar.filter(v=>kayitMacId(v)===macId).length;
             const sorunlar=denetim.sorunlar.slice(0,6);
             const host=document.createElement('div');host.id='yoneticiManuelSonucHost';
             document.body.appendChild(host);
             host.innerHTML=`<div class="sure-modal-bg" role="dialog" aria-modal="true" aria-label="Yönetici onaylı maç sonucu">
               <div class="sure-modal-card" style="width:min(770px,98vw)">
-                <h2>📋 Yönetici · Resmî Sonucu Kaydet</h2>
+                <h2>✏ Yönetici · Puan Gir ve Sonucu Kesinleştir</h2>
                 <div class="puanlama-bilgi"><b>${htmlEscape(m.hukOkul)} — ${htmlEscape(m.muhOkul)}</b>
                   <div>${htmlEscape(kategori)} · Jüri kayıtları: ${puanKatsayi} · 3/3 kontrolü: <b>${denetim.ready?'TAMAM':'EKSİK / UYUŞMUYOR'}</b></div></div>
                 ${macBir?`<div class="puanlama-bilgi hata"><b>#1 maçı için 523–622 yalnızca önceki yedekteki referans değerdir.</b>
                     Canlı jüri kayıtlarının bu toplamı verdiği doğrulanmış sayılmaz. Resmî tutanakla karşılaştırarak onaylayın. Yanlış/fazladan puan kayıtları otomatik silinmez.</div>`:''}
                 ${!denetim.ready?`<div class="puanlama-bilgi hata">Normal kesinleştirmeyi durduran kontroller:
                     ${sorunlar.length?'<div>'+sorunlar.map(x=>htmlEscape(x)).join('<div></div>')+'</div>':'<div>Jüri veya öğrenci kadrosu henüz tamamlanmadı.</div>'}
-                    <div style="margin-top:7px">Bu ekrandaki yönetici kararı jüri puanlarını değiştirmez; kaydın gerekçesi ve eski maç durumu arşivlenir.</div></div>`:''}
+                    <div style="margin-top:7px">Bu ekrandaki yönetici kararı jüri puanlarını değiştirmez; önceki maç durumu arşivlenir.</div></div>`:''}
                 <label class="puanlama-etiket" for="manuelPuanHuk">${htmlEscape(m.hukOkul)} — toplam puan</label>
                 <input type="number" id="manuelPuanHuk" min="0" max="100000" step="1" value="${ph}" oninput="yoneticiManuelToplamDegisti()" placeholder="Puan yoksa boş bırakın">
                 <label class="puanlama-etiket" for="manuelPuanMuh">${htmlEscape(m.muhOkul)} — toplam puan</label>
                 <input type="number" id="manuelPuanMuh" min="0" max="100000" step="1" value="${pm}" oninput="yoneticiManuelToplamDegisti()" placeholder="Puan yoksa boş bırakın">
-                <p class="sure-hint">İki toplamı da yazın veya ikisini de boş bırakıp gerekçeli (puansız) sonuç kaydedin. Puanlar eşit değilse galip yüksek puanlı okul olmalıdır.</p>
+                <p class="sure-hint">İki toplamı da yazın veya ikisini de boş bırakıp puansız sonuç kaydedin. Puanlar eşit değilse galip yüksek puanlı okul olmalıdır.</p>
                 <label class="puanlama-etiket" for="manuelKazanan">Galip okul</label>
                 <select id="manuelKazanan"><option value="">Galibi seçin</option>
                     <option value="huk">${htmlEscape(m.hukOkul)}</option>
                     <option value="muh">${htmlEscape(m.muhOkul)}</option></select>
                 ${yoneticiFiksturSecimFormu()}
-                <label class="puanlama-etiket" for="manuelSonucGerekce">Resmî tutanak / gerekçe (zorunlu)</label>
-                <textarea id="manuelSonucGerekce" rows="3" placeholder="Hangi tutanağa veya belgeye göre sonuç onaylandı? Jüri kaydı eksikse neden?"></textarea>
+                <label class="puanlama-etiket" for="manuelSonucGerekce">Yönetici notu (isteğe bağlı)</label>
+                <textarea id="manuelSonucGerekce" rows="3" placeholder="İsterseniz kısa bir not yazabilirsiniz."></textarea>
                 <label style="display:flex;align-items:center;gap:10px;margin:12px 0;font-size:12px"><input id="manuelSonucOnay" type="checkbox" style="width:auto;margin:0">
-                     Resmî sonucu ve iki takımın puanlarını doğruladım; bu işlemin yönetici kararı olarak kaydedilmesini onaylıyorum.</label>
+                     Galip okulu ve girdiğim puanları kontrol ettim; sonucu kesinleştirmeyi onaylıyorum.</label>
                 <button id="manuelSonucKaydetBtn" class="btn" style="background:#0f766e" onclick="yoneticiManuelSonucKaydet('${kategori}','${macId}')">✓ Onaylı Sonucu Firebase'e Kaydet</button>
                 <button class="btn" onclick="yoneticiManuelPencereKapat()">Vazgeç</button>
               </div></div>`;
@@ -2558,7 +2557,7 @@
         const gerekce=puanMetniNormalize(document.getElementById('manuelSonucGerekce')?.value||'');
         const kabul=document.getElementById('manuelSonucOnay')?.checked;
         if(!taraf||!['huk','muh'].includes(taraf))return alert('Galip okul seçilmelidir.');
-        if(gerekce.length<12)return alert('Denetlenebilir tutanak/gerekçe en az 12 karakter olmalıdır.');
+        
         if(!kabul)return alert('Sonuç doğrulama kutusunu işaretlemeniz gerekir.');
         if((hs==='')!==(ms===''))return alert('İki toplamı da yazın veya ikisini de boş bırakın.');
         const sayisal=hs!=='';
@@ -2584,18 +2583,18 @@
             const eslesmeHata=fixture?'':'Resmî maç numarası seçilmedi. Sonuç merkezî olarak kaydedilecek; fikstür eşitlemesi bekleyecek.';
             const warn=fixture?'Resmî fikstür ve merkezî turnuva ağacına da aktarılacak.':
                 'DİKKAT: Fikstürde eşleşme bulunamadı. Maç sonucu merkezi Firebase maç kaydında KAPALI olarak tutulacak, ancak resmi turnuva ağacına aktarılmayacak.\n'+eslesmeHata;
-            if(!confirm(`YÖNETİCİ SONUÇ ONAYI\n\n${m.hukOkul}: ${sayisal?ph:'Belirtilmedi'}\n${m.muhOkul}: ${sayisal?pm:'Belirtilmedi'}\nGALİP: ${kazanan}\nGEREKÇE: ${gerekce}\n\n${warn}\n\nMevcut jüri kayıtları silinmeyecek. Sonucu kesinleştirelim mi?`))return;
+            if(!confirm(`YÖNETİCİ SONUÇ ONAYI\n\n${m.hukOkul}: ${sayisal?ph:'Belirtilmedi'}\n${m.muhOkul}: ${sayisal?pm:'Belirtilmedi'}\nGALİP: ${kazanan}\nNOT: ${gerekce||"Yönetici onayı"}\n\n${warn}\n\nMevcut jüri kayıtları silinmeyecek. Sonucu kesinleştirelim mi?`))return;
             // Her iki takımın önceki durumları ve tüm bu maça ait ham jüri kayıtları
             // sunucuya arşivlenmeden kapatma yapılmaz.
             const pSnap=await db.ref('puanlar/'+kategori).once('value');
             const raw=yoneticiMacaAitHamPuanlar(pSnap,macId);
             const sonuc={kazanan,maglup,yontem:sayisal?'yonetici_onayli_puan':'yonetici_karari',
-                gerekce,puanHuk:ph,puanMuh:pm,macNo:fixture?.no||null,kategori,macId,
+                gerekce:gerekce||"Yönetici onayı",puanHuk:ph,puanMuh:pm,macNo:fixture?.no||null,kategori,macId,
                 sureHuk:m.sureEsitlik?.hukSaniye??null,sureMuh:m.sureEsitlik?.muhSaniye??null,
                 createdAt:Date.now(),senkronDurum:fixture?'bekliyor':'fikstur_eslesme_gerekli',
                 fiksturBaglantisi:baglanti,fiksturKazanan,
                 yoneticiIstisnasi:true,puanKayitSayisi:Object.keys(raw).length,
-                kaynak:'yonetici_onayli_resmi_tutanak'};
+                kaynak:'yonetici_onayli_sonuc'};
             const auditPath=`arsiv/yoneticiKararlari/${kategori}/${Date.now()}_${macId}_resmi_sonuc`;
             await db.ref(auditPath).set({kategori,macId,mac:{...m},sonuc,
                 oncekiPuanKayitlari:raw,fiksturEslesmeHatasi:eslesmeHata,
