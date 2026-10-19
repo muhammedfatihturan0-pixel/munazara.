@@ -190,7 +190,7 @@
 </div>
 
 <script>
-    const APP_VERSION = '3.11 · Güvenli Maç #1 Onarımı · Denetimli Sonuç';
+    const APP_VERSION = '3.12 · Güvenli Onarım · Ana Ekrandan Öğrenci Süreleri';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -460,6 +460,10 @@
                         <span><span class="home-card-title">🔐 Yönetici Modülü</span><span class="home-card-desc">Fikstür, öğrenci listeleri, maç sonuçları, öğrenci süreleri, hükmen kararlar ve özel raporlar.</span></span>
                         <span class="home-arrow">→</span>
                     </button>
+                    <button class="home-link" style="grid-column:1/-1;min-height:120px;" onclick="renderSureAnaEkran()">
+                        <span><span class="home-card-title">⏱ Öğrenci Süreleri — Hızlı Giriş</span><span class="home-card-desc">Maçı seçin; kayıtlı öğrenciler iki takıma otomatik atansın. Her öğrenciye ait konuşma süresini sayaçla ölçün veya elle girip Firebase'e kaydedin. Yönetici yetkisi gerekir.</span></span>
+                        <span class="home-arrow">→</span>
+                    </button>
                 </div>
                 <div class="home-foot"><span>Fikstür ve jüri puanları merkezi Firebase üzerinde tutulur.</span><button onclick="renderHakkinda()">Uygulama Hakkında →</button></div>
             </main>`;
@@ -479,6 +483,7 @@
                 <header class="home-head"><div class="home-eyebrow">Yetkili alanı</div><h1>Yönetici Modülü</h1><p>İşlem yapmak istediğiniz bölümü seçin.</p></header>
                 <div class="home-grid">
                     <button class="home-link primary" onclick="renderYoneticiCanliPanel()"><span><span class="home-card-title">✅ Maç Yönetimi ve Süreler</span><span class="home-card-desc">Maç kapat, yeniden aç, hükmen sonuçlandır, boş maç kaydını sil, öğrenci sürelerini kaydet.</span></span><span class="home-arrow">→</span></button>
+                    <button class="home-link" onclick="renderSureAnaEkran()"><span><span class="home-card-title">⏱ Öğrenci Süreleri — Hızlı Giriş</span><span class="home-card-desc">Maç seçimiyle öğrencileri otomatik atar, kişi başı sayaç ve süre kaydı açar.</span></span><span class="home-arrow">→</span></button>
                     <button class="home-link" onclick="renderTurnuva()"><span><span class="home-card-title">📅 Fikstür ve Görevlendirmeler</span><span class="home-card-desc">Maç takvimi, jüri ve öğretmen görevlendirmeleri, resmî listeler.</span></span><span class="home-arrow">→</span></button>
                     <button class="home-link" onclick="renderFiksturIstisnaYonetimi()"><span><span class="home-card-title">🔄 Fikstür İstisnaları</span><span class="home-card-desc">Yönetici: okulu değiştir, maçı boş seansa taşı veya 35 numaralı boş maçı doldur.</span></span><span class="home-arrow">→</span></button>
                      <button class="home-link" onclick="showReport()"><span><span class="home-card-title">📊 Özel Sonuçlar ve Tutanak</span><span class="home-card-desc">Öğrenci/jüri puanları, Excel ve tek maça odaklı kompakt A4 yatay PDF.</span></span><span class="home-arrow">→</span></button>
@@ -867,6 +872,7 @@
         if(modul==='ogrenci')renderOgrenci();
         if(modul==='turnuva')renderTurnuva();
         if(modul==='canli')renderYoneticiCanliPanel();
+        if(modul==='sure')renderSureAnaEkran();
         if(modul==='rapor')showReport();
     }
 
@@ -1353,6 +1359,74 @@
         return Number.isSafeInteger(toplam) && toplam>0 && toplam<=359999 ? toplam : null;
     }
 
+    // V3.12 - Ana sayfadan tek adımda öğrenci sürelerine erişim.
+    // Fikstür + varsa canlı maçlar okunur; maçı seçince öğrenciler doğru takıma bağlanır.
+    let sureHizliMaclar=new Map();
+    let sureHizliEkranSurumu=0;
+    async function renderSureAnaEkran(){
+        if(!adminYetkiliMi() && !adminSifreDogrula('Öğrenci süreleri için yönetici şifresi:'))return;
+        dinleyicileriTemizle();
+        const id=++sureHizliEkranSurumu, kategori=secimler.kategori;
+        document.getElementById('app').innerHTML=`<div class="card" style="max-width:960px">
+            <h2>⏱ Öğrenci Süreleri — Hızlı Giriş</h2>
+            <div class="puanlama-bilgi">Maçın iki takımına ait öğrenciler <b>otomatik eşleştirilir.</b> Her öğrenci için sayacı başlatıp durdurabilir ya da süreyi dakika:saniye biçiminde girebilirsiniz. Kaydet düğmesi yalnızca seçilen maçın öğrenci sürelerini günceller; jüri puanlarını değiştirmez.</div>
+            <div class="btn-grid" style="grid-template-columns:1fr 1fr">
+                <button class="btn kat-btn ${kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this,'ORTAOKUL','sure')">ORTAOKUL</button>
+                <button class="btn kat-btn ${kategori==='LİSE'?'btn-active':''}" onclick="katSec(this,'LİSE','sure')">LİSE</button>
+            </div>
+            <label class="puanlama-etiket" for="sureHizliMacSec">Maç seçin</label>
+            <select id="sureHizliMacSec" onchange="sureHizliSecimiGuncelle()"><option value="">Fikstür yükleniyor…</option></select>
+            <div class="sure-hint" id="sureHizliBilgi">Sadece gerçek iki takımlı maçlar listelenir. Kapalı maçların mevcut süreleri salt okunur olarak görüntülenebilir.</div>
+            <button id="sureHizliAcBtn" class="btn" style="background:#0369a1" onclick="sureHizliAc()" disabled>⏱ Seçili Maçın Öğrenci Sürelerini Aç</button>
+            <button class="btn" onclick="renderSureAnaEkran()">↻ Maçları Yenile</button>
+            <button class="btn" style="background:#475569" onclick="anaMenu()">← Ana Menü</button>
+            <div id="sureModalHost" class="no-print"></div>
+        </div>`;
+        try {
+            const [mSnap,fixture]=await Promise.all([
+                db.ref('maclar/'+kategori).once('value'),
+                puanlamaFiksturMaclariniOku().catch(()=>[])
+            ]);
+            if(id!==sureHizliEkranSurumu || !document.getElementById('sureHizliMacSec'))return;
+            const fromDB={};mSnap.forEach(c=>{fromDB[c.key]=c.val();});
+            const matches=new Map();
+            for(const f of fixture){
+                if(f.cat!==(kategori==='LİSE'?'lise':'ortaokul') || !puanlamaGecerliFiksturMaci(f))continue;
+                const mid=macKimligiOlustur(kategori,f.team1,f.team2);
+                matches.set(mid,{...puanlamaFiksturMacKaydi(f),...(fromDB[mid]||{}),id:mid});
+            }
+            for(const [mid,m] of Object.entries(fromDB)){
+                if(!m?.hukOkul||!m?.muhOkul||matches.has(mid))continue;
+                matches.set(mid,{...m,id:mid});
+            }
+            sureHizliMaclar=matches;
+            // Henüz Firebase'de operasyon kaydı olmayan resmî fikstür maçları için
+            // yoneticiMaciniHazirla() bu liste üzerinden güvenli kayıt oluşturabilir.
+            yoneticiFiksturMaclari=[...matches.values()];
+            const arr=[...matches.values()].filter(m=>m.hukOkul&&m.muhOkul && !m.isPending && !['boş','bay'].includes(fiksturIstisnaNorm(m.hukOkul)) && !['boş','bay'].includes(fiksturIstisnaNorm(m.muhOkul)))
+                .sort((a,b)=>(Number(a.fiksturNo)||9999)-(Number(b.fiksturNo)||9999));
+            const sel=document.getElementById('sureHizliMacSec');
+            sel.innerHTML='<option value="">Bir maç seçiniz</option>'+arr.map(m=>`<option value="${htmlEscape(m.id)}">${m.fiksturNo?'#'+m.fiksturNo+' · ':''}${htmlEscape(m.hukOkul)} — ${htmlEscape(m.muhOkul)}${m.durum==='kapali'?' [KAPALI]':m.durum==='iptal'?' [İPTAL]':''}</option>`).join('');
+            const note=document.getElementById('sureHizliBilgi');
+            if(note)note.textContent=`${arr.length} maç listelendi. Maçı seçip süre ekranını açın. Eksik veya belirsiz öğrenci listesinde seçim onayı istenir.`;
+        }catch(err){const note=document.getElementById('sureHizliBilgi');if(note)note.textContent='Maçlar yüklenemedi: '+String(err?.message||err);}
+    }
+    function sureHizliSecimiGuncelle(){
+        const mid=document.getElementById('sureHizliMacSec')?.value||'';
+        const m=sureHizliMaclar.get(mid);
+        const btn=document.getElementById('sureHizliAcBtn');if(btn)btn.disabled=!m||m.durum==='iptal'||(m.durum==='kapali'&&!sureKapanmisMacKaydiIzni(m));
+        const info=document.getElementById('sureHizliBilgi');
+        if(info && m)info.textContent=m.durum==='kapali'
+            ? (sureKapanmisMacKaydiIzni(m)?(m.sureEsitlik?.ogrenciler?'Maç kapalı: kayıtlı süreleri yalnız görüntüleyebilirsiniz.':'Maç puan farkıyla kesinleşmiş: ilk süre kaydı yalnız tutanak için eklenebilir, galip değiştirilmez.'):'Maç kesinleşmiş. Süre eklemek sonucu değiştirebileceği için engellendi.')
+            :'Seçilen maç: '+m.hukOkul+' / '+m.muhOkul+'. Öğrenciler Firebase kadrolarından otomatik getirilecek.';
+    }
+    async function sureHizliAc(){
+        const mid=document.getElementById('sureHizliMacSec')?.value||'';
+        const m=sureHizliMaclar.get(mid);
+        if(!m)return alert('Önce bir maç seçin.');
+        if(m.durum==='iptal'||(m.durum==='kapali'&&!sureKapanmisMacKaydiIzni(m)))return alert('Bu maçın süre kaydına izin verilmiyor.');
+        await sureModalAc(secimler.kategori,mid);
+    }
     let aktifSureModal=null;
     let sureTickTimer=null;
     let sureTiklayanTaraf=null;
@@ -1449,6 +1523,24 @@
             defaultKaynak[taraf]=keys.find(k=>skorEslesmeAnahtari(k)===skorEslesmeAnahtari(kaynak))
                 ||keys.find(k=>skorEslesmeAnahtari(k)===skorEslesmeAnahtari(okul))||'';
         }
+        // En güvenilir kaynak: doğru okul adındaki kadro. Maçta jüri puanı varsa
+        // otomatik seçim bu öğrencilerin tamamını kapsamalıdır.
+        const kapsiyor=(taraf,kaynak)=>{
+            const roster=okullar[kaynak]||[];
+            const keys=new Set(roster.map(skorEslesmeAnahtari));
+            return roster.length>0 && (puandan[taraf]||[]).every(ad=>keys.has(skorEslesmeAnahtari(ad)));
+        };
+        for(const taraf of ['huk','muh']){
+            const okul=taraf==='huk'?mac.hukOkul:mac.muhOkul;
+            const tam=keys.find(k=>skorEslesmeAnahtari(k)===skorEslesmeAnahtari(okul));
+            if(tam && kapsiyor(taraf,tam)) defaultKaynak[taraf]=tam;
+            else if(defaultKaynak[taraf] && !kapsiyor(taraf,defaultKaynak[taraf])) defaultKaynak[taraf]='';
+            // Tam isim bulunmazsa, puanlanmış öğrencilerin tümünü içeren TEK kadroyu kullan.
+            if(!defaultKaynak[taraf] && (puandan[taraf]||[]).length){
+                const adaylar=keys.filter(k=>kapsiyor(taraf,k));
+                if(adaylar.length===1) defaultKaynak[taraf]=adaylar[0];
+            }
+        }
         if(defaultKaynak.huk&&defaultKaynak.muh && defaultKaynak.huk!==defaultKaynak.muh){
             sureSureFormuGoster(baglam,{huk:okullar[defaultKaynak.huk],muh:okullar[defaultKaynak.muh]},defaultKaynak);
             return;
@@ -1503,8 +1595,19 @@
         if(!confirm(`Süre kaydında kullanılacak gerçek öğrencileri onaylıyor musunuz?\n${b.mac.hukOkul}: ${ogrenciler.huk.join(', ')}\n${b.mac.muhOkul}: ${ogrenciler.muh.join(', ')}\n\nJüri puanları, fikstür ve okul kayıtları değiştirilmeyecek.`))return;
         sureSureFormuGoster(b,ogrenciler,kaynaklar);
     }
+    // Kapanmış, puan farkıyla kazanılmış maçta ilk süre belgesi sonucu etkilemez.
+    // Puan eşitliğiyle kapanmış, hükmen bitmiş veya iptal edilmiş maça dokunulmaz.
+    function sureKapanmisMacKaydiIzni(m){
+        if(!m||m.durum!=='kapali')return false;
+        if(m.sureEsitlik?.ogrenciler)return true; // sadece görüntüleme
+        const s=m.sonuc||{};
+        return s.yontem==='puan' && !!s.kazanan && Number.isFinite(Number(s.puanHuk)) && Number.isFinite(Number(s.puanMuh)) &&
+            Number(s.puanHuk)!==Number(s.puanMuh) &&
+            s.kazanan===(Number(s.puanHuk)>Number(s.puanMuh)?m.hukOkul:m.muhOkul);
+    }
     function sureSureFormuGoster(baglam,ogrenciler,kaynaklar){
         const {kategori,macId,mac:m}=baglam;
+            const saltOkunur=m.durum==='kapali' && !!m.sureEsitlik?.ogrenciler;
             aktifSureModal={kategori,macId,mac:m,ogrenciler,kaynaklar,
                 oncekiGuncelleme:m.sureEsitlik?.updatedAt||0};
             const host=document.getElementById('sureModalHost');
@@ -1517,18 +1620,19 @@
                         const value=v&&Number.isInteger(v.saniye)?v.saniye:0;
                         const id=taraf+'_'+i;
                         return `<div class="sure-student-row"><span class="sure-student-name">${i+1}. ${htmlEscape(ad)}</span>
-                            <input id="sureTakim${id}" value="${sureyiMetneDonustur(value)}" inputmode="numeric" aria-label="${htmlEscape(ad)} konuşma süresi" oninput="sureTakimToplamlariniGuncelle()">
-                            <button class="btn sure-sayac-btn" id="sureBaslat${id}" onclick="sureSayaciniDegistir('${id}')">▶ Başlat</button></div>`;
+                            <input id="sureTakim${id}" value="${sureyiMetneDonustur(value)}" inputmode="numeric" aria-label="${htmlEscape(ad)} konuşma süresi" oninput="sureTakimToplamlariniGuncelle()" ${saltOkunur?'disabled':''}>
+                            <button class="btn sure-sayac-btn" id="sureBaslat${id}" onclick="sureSayaciniDegistir('${id}')" ${saltOkunur?'disabled':''}>▶ Başlat</button></div>`;
                     }).join('')}
                     <div class="sure-hint"><b>Okul toplamı: <span id="sureToplam_${taraf}">00:00</span></b></div></div>`;
             };
             host.innerHTML=`<div class="sure-modal-bg" role="dialog" aria-modal="true" aria-label="Öğrenci bazlı süre kaydı"><div class="sure-modal-card" style="width:min(950px,98vw)">
                 <h2>⏱ Öğrenci Bazlı Konuşma Süreleri</h2>
                 ${kaynaklar.huk!==m.hukOkul||kaynaklar.muh!==m.muhOkul?`<div class="puanlama-bilgi">Öğrenci listesi kaynakları: ${htmlEscape(m.hukOkul)} → ${htmlEscape(kaynaklar.huk==='__PUAN__'?'Kaydedilmiş jüri puanları':kaynaklar.huk)} · ${htmlEscape(m.muhOkul)} → ${htmlEscape(kaynaklar.muh==='__PUAN__'?'Kaydedilmiş jüri puanları':kaynaklar.muh)}. <b>Bu süre kaydı puanları veya fikstürü değiştirmez.</b></div>`:''}
+                ${m.durum==='kapali'?`<div class="puanlama-bilgi">Bu maç <b>KESİNLEŞTİRİLDİ.</b> ${saltOkunur?'Süreler yalnızca görüntüleniyor.':'Puan farkıyla kesinleşen maçın öğrenci süreleri sadece tutanak için ilk kez kaydedilebilir; puan ve galip değişmez.'}</div>`:''}
                 <p class="sure-hint">Her öğrenci için ayrı süre kaydedin veya öğrenci sayacını kullanın. Okul toplamı otomatik hesaplanır. Konuşmayan öğrenci 00:00 kalabilir; her okulun toplamı sıfırdan büyük olmalıdır.</p>
                 <div class="sure-student-grid">${panel('huk',m.hukOkul)}${panel('muh',m.muhOkul)}</div>
                 <p class="sure-hint">Puan eşitliğinde, toplam konuşma süresi daha kısa olan okul galip sayılır. Süreler yeniden kaydedilirse tüm öğrenci kayıtları bir arada güncellenir.</p>
-                <button class="btn" style="background:var(--success)" onclick="sureFirebaseKaydet()">☁ Öğrenci Sürelerini Kaydet</button>
+                ${saltOkunur?'':`<button class="btn" style="background:var(--success)" onclick="sureFirebaseKaydet()">☁ Öğrenci Sürelerini Kaydet</button>`}
                 <button class="btn" onclick="sureModalKapat()">Kapat</button>
                 </div></div>`;
             sureTakimToplamlariniGuncelle();
@@ -1539,7 +1643,7 @@
         try {
             const m=await yoneticiMaciniHazirla(kategori,macId);
             if(!m?.hukOkul||!m?.muhOkul)throw new Error('Maçın iki okulu bulunamadı.');
-            if(m.durum!=='acik')throw new Error('Kapalı veya iptal edilmiş maçın süresi değiştirilemez. Sonuç kesinleşmişse yeniden açma işlemi galibi etkileyebilir; önce mevcut sonucu kontrol edin.');
+            if(m.durum!=='acik' && !sureKapanmisMacKaydiIzni(m))throw new Error('Bu maçın süresi değiştirilemez. Puan eşitliği veya hükmen sonuç varsa galip etkilenebileceğinden kayıt engellendi.');
             const [oSnap,pSnap]=await Promise.all([
                 db.ref('okullar/'+kategori).once('value'),db.ref('puanlar/'+kategori).once('value')
             ]);
@@ -1563,9 +1667,16 @@
             }
             if(!toplam[taraf])return alert((taraf==='huk'?mac.hukOkul:mac.muhOkul)+' toplam süresi 00:00 olamaz.');
         }
+        const kapaliBelgeleme=mac.durum==='kapali' && !mac.sureEsitlik?.ogrenciler && sureKapanmisMacKaydiIzni(mac);
+        if(mac.durum==='kapali'&&!kapaliBelgeleme)return alert('Kesinleşmiş maçın mevcut süresi değiştirilemez.');
+        if(kapaliBelgeleme && !confirm('Bu maç daha önce puan farkıyla kesinleşti. Öğrenci süreleri yalnızca tutanak için ilk kez kaydedilecek; jüri puanları, galip ve fikstür SONUCU KORUNACAK. Devam edilsin mi?'))return;
         try{
             const r=await db.ref(`maclar/${kategori}/${macId}`).transaction(cur=>{
-                if(!cur||cur.durum!=='acik'||skorEslesmeAnahtari(cur.hukOkul)!==skorEslesmeAnahtari(mac.hukOkul)||skorEslesmeAnahtari(cur.muhOkul)!==skorEslesmeAnahtari(mac.muhOkul))return;
+                if(!cur||skorEslesmeAnahtari(cur.hukOkul)!==skorEslesmeAnahtari(mac.hukOkul)||skorEslesmeAnahtari(cur.muhOkul)!==skorEslesmeAnahtari(mac.muhOkul))return;
+                if(kapaliBelgeleme){
+                    if(cur.durum!=='kapali'||cur.sureEsitlik?.ogrenciler||!sureKapanmisMacKaydiIzni(cur)||
+                        cur.sonuc?.kazanan!==mac.sonuc?.kazanan||cur.sonuc?.puanHuk!==mac.sonuc?.puanHuk||cur.sonuc?.puanMuh!==mac.sonuc?.puanMuh)return;
+                }else if(cur.durum!=='acik')return;
                 if((cur.sureEsitlik?.updatedAt||0)!==oncekiGuncelleme)return;
                 cur.sureEsitlik={hukOkul:cur.hukOkul,muhOkul:cur.muhOkul,hukSaniye:toplam.huk,muhSaniye:toplam.muh,ogrenciler:detay,
                         kaynaklar:{huk:aktifSureModal.kaynaklar.huk,muh:aktifSureModal.kaynaklar.muh},updatedAt:Date.now()};
@@ -1573,8 +1684,14 @@
             },undefined,false);
             if(!r.committed)return alert('Süre kaydı başka cihazda değişti veya maç kapatıldı. Tekrar açıp kontrol edin.');
             sureModalKapat();
+            if(kapaliBelgeleme){
+                try{await db.ref(`arsiv/yoneticiKararlari/${kategori}/${Date.now()}_${macId}_sure_belgeleme`).set({macId,
+                    islem:'kesinlesen_maca_ilk_sure_belgesi',kazanan:mac.sonuc?.kazanan,puanHuk:mac.sonuc?.puanHuk,puanMuh:mac.sonuc?.puanMuh,
+                    sureHuk:toplam.huk,sureMuh:toplam.muh,ogrenciler:detay,createdAt:firebase.database.ServerValue.TIMESTAMP});}
+                catch(e){alert('Süreler kaydedildi ancak yönetici denetim kaydı yazılamadı. Ayrı JSON yedeği alın: '+String(e?.message||e));}
+            }
             alert(`Öğrenci süreleri kaydedildi. ${mac.hukOkul}: ${sureyiMetneDonustur(toplam.huk)} · ${mac.muhOkul}: ${sureyiMetneDonustur(toplam.muh)}`+
-                (kaynaklar.huk!==mac.hukOkul||kaynaklar.muh!==mac.muhOkul?'\n\nÖnemli: Bu yalnızca SÜRE kaydıdır. Maç kesinleştirmede öğrenci listesi uyuşmazlığı çıkarsa Yönetici → Okullar ve Öğrenciler → Öğrenci Listesi Eşleştirmeleri kısmında doğru listeleri doğrulayın.':''));
+                (!kapaliBelgeleme && (kaynaklar.huk!==mac.hukOkul||kaynaklar.muh!==mac.muhOkul)?'\n\nÖnemli: Bu yalnızca SÜRE kaydıdır. Maç kesinleştirmede öğrenci listesi uyuşmazlığı çıkarsa Yönetici → Okullar ve Öğrenciler → Öğrenci Listesi Eşleştirmeleri kısmında doğru listeleri doğrulayın.':''));
         }catch(err){alert('Süreler kaydedilemedi: '+(err?.message||err));}
     }
 
@@ -2190,6 +2307,17 @@
             throw new Error('Öğrenci listelerinden biri canlı veritabanında bulunamadı.');
         return {huk,muh,gecerli:raw.length,fazladan:supheliVar?1:0,supheli:supheliVar?supheli:null,kaynaklar:m2.ogrenciKaynaklari};
     }
+    function acilSupheliKayitEsitMi(a,b){
+        if(!a||!b)return false;
+        const norm=v=>puanMetniNormalize(v);
+        const same=(x,y)=>norm(x)===norm(y);
+        const sa=a.secim||{},sb=b.secim||{};
+        return same(a.macId||sa.macId,b.macId||sb.macId)
+            && same(sa.okul,sb.okul) && same(sa.ogr,sb.ogr)
+            && same(sa.juri,sb.juri) && same(sa.taraf,sb.taraf)
+            && same(sa.kategori,sb.kategori) && a.createdAt===b.createdAt
+            && krit.every((_,i)=>Number(a.puanlar?.[i]??a.puanlar?.[String(i)])===Number(b.puanlar?.[i]??b.puanlar?.[String(i)]));
+    }
     async function acilMacCanliVeriOku(){
         const c=ACIL_MAC_1;
         const [m,p,o,f]=await Promise.all([
@@ -2261,20 +2389,34 @@
                     gerekce:'Aynı öğrenci 1. Jüri tarafından iki konuşmacı sırası ile puanlanmış; kadroda 3. konuşmacı, kayıt 1. konuşmacı. 59 puan hesap dışı.',
                     tamYedekArsivYolu:`arsiv/tamYedek/${c.kat}/${arsivKey}`,archivedAt:firebase.database.ServerValue.TIMESTAMP
                 });
-                const original=JSON.stringify(x.supheli);
-                const rm=await db.ref(`puanlar/${c.kat}/${c.hataliKayit}`).transaction(cur=>{
-                    if(JSON.stringify(cur)!==original)return;
+                // Firebase transaction'ında nesne anahtar sırası/ek senkronizasyon alanları
+                // değişebilir. Yalnız puan ve kimlik alanlarını karşılaştır; farklıysa asla silme.
+                const leaf=db.ref(`puanlar/${c.kat}/${c.hataliKayit}`);
+                const sonOkuma=(await leaf.once('value')).val();
+                if(!acilSupheliKayitEsitMi(x.supheli,sonOkuma))
+                    throw new Error('59 puanlık kayıt doğrulama sırasında değişti veya kayboldu. Yeni denetim yapın; silme yapılmadı.');
+                const rm=await leaf.transaction(cur=>{
+                    if(!acilSupheliKayitEsitMi(sonOkuma,cur))return;
                     return null;
                 },undefined,false);
-                if(!rm.committed)throw new Error('59 puanlık kayıt başka cihazda değişti. Arşiv alındı, ancak silme yapılmadı. Yeniden kontrol edin.');
+                if(!rm.committed){
+                    const now=(await leaf.once('value')).val();
+                    if(now==null)throw new Error('Şüpheli kayıt işlem sırasında silinmiş. Sayfayı yenileyin; yeniden denetim olmadan sonraki işlem yapılmadı.');
+                    if(acilSupheliKayitEsitMi(sonOkuma,now))
+                        throw new Error('Puan kaydı değişmemiş; ancak sunucu işlemi onaylamadı (ilk değer/izin/bağlantı). Firebase yetkilerini kontrol edip yeniden deneyin.');
+                    throw new Error('Puanın kimlik veya kriter değerleri gerçekten değişmiş; güvenlik amacıyla silme yapılmadı.');
+                }
             }
             // Öğrenci listesi bağlantısı: doğru, gerçekten Firebase'de bulunan kadrolara bağla.
-            const originalMap=JSON.stringify(d.m.ogrenciKaynaklari||{});
-            const mapR=await db.ref(`maclar/${c.kat}/${c.id}`).transaction(cur=>{
+            const originalMap=d.m.ogrenciKaynaklari||{};
+            const mapRef=db.ref(`maclar/${c.kat}/${c.id}`);
+            await mapRef.once('value');
+            const mapR=await mapRef.transaction(cur=>{
                 if(!cur||cur.durum!=='acik'||cur.updatedAt!==d.m.updatedAt||
                     skorEslesmeAnahtari(cur.hukOkul)!==skorEslesmeAnahtari(c.huk)||
                     skorEslesmeAnahtari(cur.muhOkul)!==skorEslesmeAnahtari(c.muh)||
-                    JSON.stringify(cur.ogrenciKaynaklari||{})!==originalMap)return;
+                    (cur.ogrenciKaynaklari?.huk||'')!==(originalMap.huk||'')||
+                    (cur.ogrenciKaynaklari?.muh||'')!==(originalMap.muh||''))return;
                 cur.ogrenciKaynaklari={...x.kaynaklar};cur.updatedAt=Date.now();
                 cur.onarim={mac1:true,arsivKey,updatedAt:Date.now(),aciklama:'Öğrenci kaynağı bağlantısı onarıldı; şüpheli jüri puanı arşivlendi.'};
                 return cur;
@@ -2282,7 +2424,7 @@
             if(!mapR.committed)throw new Error('Okul kaynağı başka cihazda değişti. Puan kaydı arşivlenmiş olabilir. Yönetici onarım ekranından yeniden kontrol edin.');
             const after=await acilMacCanliVeriOku();
             acilMacPuanKontrol(after.puanlar,after.roster,after.m);
-            alert('59 puanlık çelişkili kayıt güvenle arşivlendi ve okul bağlantısı onarıldı. Şimdi standart sonuç kesinleştirme onayı açılacak.');
+            alert('59 puanlık çelişkili kayıt arşivlenerek değerlendirmeden çıkarıldı; okul bağlantısı onarıldı. Sonraki onayda 523–622 sonucunu kesinleştirin.');
             // Kapatma ve resmî fikstüre işleme mevcut tek resmî fonksiyondan yapılır.
             await macDurumuDegistir(c.kat,c.id,'kapali');
         }catch(err){alert('Güvenli onarım tamamlanamadı: '+String(err?.message||err)+'\nVerileri silmeyin. Yönetici ekranından canlı durumu kontrol edin.');}
