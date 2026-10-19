@@ -190,7 +190,7 @@
 </div>
 
 <script>
-    const APP_VERSION = '3.16 · Canlı Jüri Puanları ve Ortak 5 Dakika';
+    const APP_VERSION = '3.17 · Fikstür Sonuç Durumu ve Sade Menü';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -453,15 +453,11 @@
                 </header>
                 <div class="home-grid">
                     <button class="home-link primary" onclick="renderPuanlamaSecim()">
-                        <span><span class="home-card-title">📝 Jüri Modülü</span><span class="home-card-desc">Jüri kimliğinizi seçin, öğrencileri belirleyin ve 13 değerlendirme kriterini doğrudan puanlayın. Şifre gerekmez. İlk jüri puanlamayı açınca öğrenciye özel ortak 5 dakikalık sayaç başlar.</span></span>
+                        <span><span class="home-card-title">📝 Jüri Modülü</span><span class="home-card-desc">Jüri kimliğinizi seçin, öğrencileri belirleyin ve 13 değerlendirme kriterini doğrudan puanlayın. Şifre gerekmez. Öğrenci seçilip “Kriterleri Puanla” açılınca ortak 5 dakikalık sayaç görünür ve başlar.</span></span>
                         <span class="home-arrow">→</span>
                     </button>
                     <button class="home-link" onclick="sifreliModulKontrol('yonetici')">
                         <span><span class="home-card-title">🔐 Yönetici Modülü</span><span class="home-card-desc">Fikstür, öğrenci listeleri, maç sonuçları, öğrenci süreleri, hükmen kararlar ve özel raporlar.</span></span>
-                        <span class="home-arrow">→</span>
-                    </button>
-                    <button class="home-link" style="grid-column:1/-1;min-height:120px;" onclick="renderSureAnaEkran()">
-                        <span><span class="home-card-title">⏱ Öğrenci Süreleri — Şifresiz Giriş</span><span class="home-card-desc">Maçı seçin, iki takımın öğrencilerini görün; süreleri sayaçla veya elle girin ve kaydedin. Yönetici şifresi gerekmez.</span></span>
                         <span class="home-arrow">→</span>
                     </button>
                 </div>
@@ -1102,7 +1098,7 @@
             const ad=skorEslesmeAnahtari((secimler.ogr||'').split(' (')[0]);
             const rec=(m.sureEsitlik?.ogrenciler?.[taraf]||[]).find(x=>skorEslesmeAnahtari(x.ad)===ad);
             alan.textContent=rec ? '⏱ Kayıtlı konuşma süresi: '+sureyiMetneDonustur(rec.saniye)
-                : '⏱ Bu öğrenci için henüz konuşma süresi kaydedilmemiş. Süre ekranına jüri ana sayfasından şifresiz ulaşılabilir.';
+                : '⏱ Bu öğrenci için henüz resmî konuşma süresi kaydedilmemiş. Yönetici → Maç Yönetimi → Öğrenci Süreleri bölümünden kaydedilebilir.';
         }).catch(err=>{const alan=document.getElementById('juriSureBilgisi');if(alan)alan.textContent='Konuşma süresi okunamadı: '+String(err?.message||err);});
         void ortakSureBaslat(secimler.kategori,mac,secimler.okul,secimler.ogr);
         krit.forEach((k, i) => {
@@ -1391,7 +1387,17 @@
 
     // --- YÖNETİCİ CANLI PANELİ ---
     let yoneticiFiksturMaclari = [];
+    let yoneticiResmiFiksturDurumu = null;
     let yoneticiSonPanelVerileri = null;
+    // Resmî sonuç, operasyon maç kaydının durumundan BAĞIMSIZ bir Firebase ağacında tutulur.
+    // Bu ekran yalnızca okur: 'AÇIK' kayıtları sessizce kapatmaz, sonuçları değiştirmez.
+    function canliResmiMacSonucu(fiksturNo, kategori){
+        const no=Number(fiksturNo);
+        if(!Number.isInteger(no)||no<=0)return null;
+        const v=yoneticiResmiFiksturDurumu?.finalizedMatches?.[no];
+        if(!v || (v.kategori && v.kategori!==kategori))return null;
+        return v;
+    }
     function yoneticiTabloFiltresiniGuncelle(){
         if(yoneticiSonPanelVerileri)canliPaneliCiz(...yoneticiSonPanelVerileri);
     }
@@ -1409,6 +1415,7 @@
     function renderYoneticiCanliPanel() {
         if(!adminYetkiliMi())return alert('Yönetici yetkisi gerekiyor.');
         yoneticiFiksturMaclari=[];
+        yoneticiResmiFiksturDurumu=null;
         dinleyicileriTemizle();
         document.getElementById('app').innerHTML = `
             <div class="card" style="max-width:1200px;">
@@ -1419,7 +1426,7 @@
                 </div>
                 <div id="liveMetrics" class="admin-summary-grid"></div>
                 <div class="kriter-card"><h3 style="margin-top:0;color:var(--text-main);">Maçlar · Canlı Puanlar ve 3/3 Jüri Durumu</h3>
-                  <div class="sure-hint">Kaydedilen jüri puanları <b>3/3 tamamlanmadan da</b> anında görünür; kısmi puanlar geçicidir. <b>Puan Gir / Sonucu Kesinleştir</b> ekranı tüm maçlarda kullanılabilir. Okul adları farklıysa resmî <b>maç numarasını</b> seçip tarafları onaylayın; jüri puanları değişmeden yönetici onaylı sonuç kaydedilir. Eksik 3/3 kayıt normal kesinleştirmeyi engeller, ancak onaylı sonuç girişini engellemez. Resmî fikstürdeki mevcut farklı sonuçlar asla otomatik ezilmez.</div>
+                  <div class="sure-hint">Kaydedilen jüri puanları anında görünür; <b>3/3 eksikken toplam geçicidir</b>. <b>Resmî Sonuç</b> sayacı fikstüre kesinleşenleri, tablodaki <b>AÇIK / KAPALI</b> ise ayrı maç işlem kaydını gösterir. İkisi farklıysa kayıtlar silinmeden yönetici kontrolü gerekir. <b>Puan Gir / Sonucu Kesinleştir</b> ile resmî maç numarasını doğrulayabilirsiniz; mevcut farklı sonuç otomatik değiştirilmez.</div>
                    <div class="live-filter-bar no-print"><input id="liveMatchSearch" placeholder="Maç numarası veya okul ara..." oninput="yoneticiTabloFiltresiniGuncelle()" aria-label="Maç ara"><label><input id="iptalGoster" type="checkbox" style="width:auto;margin:0 5px 0 0;" onchange="yoneticiTabloFiltresiniGuncelle()">İptal edilenleri göster</label></div>
                   <div id="liveMatches" style="overflow-x:auto;">Yükleniyor...</div></div>
                 <div id="sureModalHost" class="no-print"></div>
@@ -1455,7 +1462,10 @@
         canliEslesmeYenile();
         const fRef=db.ref('fikstur/tekSalon_2026_2027');
         // İframe de aynı anlık veriyi okuduğundan kısa gecikme ilk değer yarışını önler.
-        fRef.on('value',()=>{
+        fRef.on('value',snapshot=>{
+            if(secimler.kategori!==currentKat || !document.getElementById('liveMatches'))return;
+            yoneticiResmiFiksturDurumu=snapshot.val()||{};
+            render();
             setTimeout(()=>{if(document.getElementById('liveMatches')&&secimler.kategori===currentKat)canliEslesmeYenile();},350);
         });
         aktifCanliPanelRefs.push(fRef);
@@ -1912,17 +1922,26 @@
             const huk=Number(g.toplamlar[m.hukOkul]||0),muh=Number(g.toplamlar[m.muhOkul]||0);
             const sure=m.sureEsitlik;
             const hamPuan=kayitliJuriPuanlariniTopla(skorlar,id,m);
+            const resmiSonuc=canliResmiMacSonucu(m.fiksturNo||m.sonuc?.macNo,secimler.kategori);
             let durumText='Jüri eksik';
             if(m.durum==='iptal')durumText='İptal edildi · fikstür kaydı korunur';
             else if(m.durum==='kapali'&&m.sonuc?.yontem==='cift_eleme')durumText='⛔ İKİ OKUL ELENDİ · Galip yok · Üst tur düzenlenmeli';
             else if(m.sonuc?.kazanan&&m.durum==='kapali')durumText=`${m.sonuc.yoneticiIstisnasi?'YÖNETİCİ ONAYLI · ':m.sonuc.yontem==='hukmen'?'HÜKMEN · ':''}Galip: ${m.sonuc.kazanan}`;
+            else if(resmiSonuc && m.durum!=='iptal')durumText=`✅ FİKSTÜRDE KESİNLEŞTİ · ${resmiSonuc.kazanan?'Galip: '+resmiSonuc.kazanan:'Galip yok'} · İşlem kaydı ${m.durum==='kapali'?'kapalı':'açık'}`;
             else if(m.isPending || [m.hukOkul,m.muhOkul].some(n=>fiksturIstisnaNorm(n)==='boş'))durumText='⏳ RAKİP BEKLENİYOR · Maç ayrıldı, galip yok';
             else if(g.ready)durumText=huk!==muh?'Puanla galip belirlenebilir':(sure?.hukSaniye>0&&sure?.muhSaniye>0?(sure.hukSaniye!==sure.muhSaniye?'Süre üstünlüğü hazır':'Son savunma gerekli'):'BERABERLİK — süre girin');
-            rows.push({id,m,...g,huk,muh,hamPuan,durumText});
+            rows.push({id,m,...g,huk,muh,hamPuan,resmiSonuc,durumText});
         });
         rows.sort((a,b)=>Number(a.m.fiksturNo||99999)-Number(b.m.fiksturNo||99999)||(a.m.etiket||'').localeCompare(b.m.etiket||'','tr'));
         const metrics=document.getElementById('liveMetrics');
-        if(metrics){const acik=rows.filter(r=>r.m.durum!=='kapali'&&r.m.durum!=='iptal').length;const kapali=rows.filter(r=>r.m.durum==='kapali').length;const tamMac=rows.filter(r=>r.ready).length;const q=Object.keys(offlineKuyrukGetir()).length;metrics.innerHTML=`<div class="admin-metric"><span>Fikstür / Kayıtlı Maç</span><strong>${rows.length}</strong></div><div class="admin-metric"><span>Açık / Kapalı</span><strong>${acik}/${kapali}</strong></div><div class="admin-metric"><span>Jürisi Tam Maç</span><strong>${tamMac}</strong></div><div class="admin-metric"><span>Bu Cihaz Kuyruğu</span><strong>${q}</strong></div>`;}
+        if(metrics){
+            const noListesi=[...new Set(yoneticiFiksturMaclari.map(m=>Number(m.fiksturNo)).filter(n=>Number.isInteger(n)&&n>0))];
+            const kesinlesen=noListesi.filter(no=>!!canliResmiMacSonucu(no,secimler.kategori)).length;
+            const bekleyen=noListesi.length-kesinlesen;
+            const tamMac=rows.filter(r=>r.ready).length;
+            const q=Object.keys(offlineKuyrukGetir()).length;
+            metrics.innerHTML=`<div class="admin-metric"><span>Resmî Fikstür Maçı</span><strong>${noListesi.length||'—'}</strong></div><div class="admin-metric"><span>Resmî Sonuç (Kesin / Bekleyen)</span><strong>${yoneticiResmiFiksturDurumu?kesinlesen+'/'+bekleyen:'Yükleniyor'}</strong></div><div class="admin-metric"><span>Jürisi Tam Maç</span><strong>${tamMac}</strong></div><div class="admin-metric"><span>Bu Cihaz Kuyruğu</span><strong>${q}</strong></div>`;
+        }
         const div=document.getElementById('liveMatches');if(!div)return;
         const search=skorEslesmeAnahtari(document.getElementById('liveMatchSearch')?.value||'');
         const iptalGoster=document.getElementById('iptalGoster')?.checked||false;
@@ -1930,7 +1949,8 @@
         let html='<table class="tutanak-table"><tr><th>Maç</th><th>Durum</th><th>3/3 Tam</th><th>Kayıtlı Puan (H / M)</th><th>Süre (H / M)</th><th>Sonuç</th><th>Yönetici İşlemleri</th></tr>';
         bulunan.forEach(r=>{
             const kap=r.m.durum==='kapali',iptal=r.m.durum==='iptal',sure=r.m.sureEsitlik;
-            const state=r.m.sonuc?.senkronDurum==='tamam'?'Eşitlendi':(kap&&r.m.sonuc?.senkronDurum==='fikstur_eslesme_gerekli'?'Fikstür eşleştirmesi gerekli':kap?'Senkron bekliyor':iptal?'İptal':'Açık');
+            const state=r.resmiSonuc && !kap && !iptal?'Fikstür kesinleşmiş · işlem kaydı açık':
+                r.m.sonuc?.senkronDurum==='tamam'?'Eşitlendi':(kap&&r.m.sonuc?.senkronDurum==='fikstur_eslesme_gerekli'?'Fikstür eşleştirmesi gerekli':kap?'Senkron bekliyor':iptal?'İptal':'Açık');
             const tip=kap?'KAPALI':iptal?'İPTAL':'AÇIK';
             const kayitliSonuc=r.m.sonuc||{};
             const kesinPuan=kap&&Number.isFinite(kayitliSonuc.puanHuk)&&Number.isFinite(kayitliSonuc.puanMuh);
