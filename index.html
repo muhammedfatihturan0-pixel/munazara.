@@ -164,7 +164,7 @@
             body > .arge-footer, body > .system-status {display:none !important;}
             #app .card {padding:0 !important;margin:0 !important;border:0 !important;box-shadow:none !important;max-width:none !important;background:#fff !important;color:#111 !important;}
             #app h2 {font-size:12pt !important;border:0 !important;margin:0 0 5mm !important;padding:0 !important;color:#111 !important;}
-            #adminMetrics,.report-summary-grid,#raporJuriKontrolKart,#rapor-tablosu,.report-print-note,#macFiltre {display:none !important;}
+            #adminMetrics,.report-summary-grid,#raporJuriKontrolKart,#rapor-tablosu,.report-print-note,#gunFiltre,#gunFiltreLabel {display:none !important;}
             .print-only {display:block !important;}
             .print-report-head {text-align:center;margin-bottom:5mm;color:#111;}
             .print-report-head h3 {font-size:12pt;color:#111;margin:2mm 0;}
@@ -236,7 +236,7 @@
 </div>
 
 <script>
-    const APP_VERSION = '3.20 · Otomatik Süre ve Jüriye Sonuç Duyurusu';
+    const APP_VERSION = '3.22 · Günlük Tutanak ve Günlük Jüri Seçimi';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -377,12 +377,29 @@
         try { return JSON.parse(localStorage.getItem(JURI_OTURUM_KEY) || 'null'); } catch (_) { return null; }
     }
 
-    function juriOturumuKilitle(juri) {
-        const ad = prompt(`${juri} için jüri ad-soyadını giriniz:`);
-        if (ad === null) return;
+    async function juriOturumuKilitle(juri, ad) {
+        const mac = puanlamaMaclar.get(secimler.macId);
+        const baglam = juriSecimBaglami(mac);
+        if (!baglam) return alert('Önce tarihi belli bir maç seçin. Günün jüri isimleri maç seçildikten sonra gösterilir.');
+        const rolAnahtari = ({'1. Jüri':'asil1','2. Jüri':'asil2','3. Jüri':'asil3'})[juri];
         const temizAd = puanMetniNormalize(ad);
-        if (!temizAd) return alert('Jüri adı boş bırakılamaz.');
-        const oturum = { juri, ad: temizAd, lockedAt: Date.now(), clientId: getClientId() };
+        if (!rolAnahtari || !temizAd) return alert('Günün üç asıl jüri listesinden kendi adınızı seçin.');
+        // Seçilen isim, maçın günü ve kategorisinin Firebase görevlendirmesinden gelmelidir.
+        try {
+            const snap = await db.ref(`fikstur/tekSalon_2026_2027/juries/${baglam.gunKey}/${baglam.kategori}`).once('value');
+            const gorevli = snap.val() || {};
+            const resmiAd = puanMetniNormalize(gorevli[rolAnahtari]?.name || '');
+            if (!resmiAd || resmiAd !== temizAd) {
+                alert('Günün jüri görevlendirmesi değişmiş veya okunamamış. Güncel isimler yeniden yüklenecek; listeden tekrar seçin.');
+                void juriPaneliniGuncelle(mac);
+                return;
+            }
+        } catch (err) {
+            alert('Günün jüri görevlendirmesi doğrulanamadı. İnternet bağlantısını kontrol edip tekrar deneyin.');
+            return;
+        }
+        const oturum = { juri, ad: temizAd, gunKey: baglam.gunKey, gunLabel: baglam.gunLabel,
+            kategori: baglam.kategori, lockedAt: Date.now(), clientId: getClientId() };
         localStorage.setItem(JURI_OTURUM_KEY, JSON.stringify(oturum));
         secimler.juri = juri;
         secimler.juriAd = temizAd;
@@ -784,18 +801,9 @@
             secimler.juriAd = oturum.ad;
         }else{secimler.juri='';secimler.juriAd='';}
         secimleriKaydet();
-        const juriHtml = oturum ? `
-            <div class="kriter-card" style="border-color:var(--success);">
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-                    <div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Bu cihazın jüri oturumu</div><b style="color:#34d399;">${htmlEscape(oturum.juri)} · ${htmlEscape(oturum.ad)}</b></div>
-                    <button class="btn" style="width:auto;padding:8px 12px;margin:0;background:#475569;" onclick="juriOturumunuSifirla()">Jüri Kilidini Kaldır 🔒</button>
-                </div><div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Yalnızca bu cihazdaki jüri oturumu kaldırılır; girilmiş puanlar silinmez.</div>
-            </div>` : `
-            <div class="kriter-card" style="border-color:#f59e0b;">
-                <div style="font-size:13px;color:#fbbf24;margin-bottom:8px;"><b>Bu cihazda jüri seçin.</b> Seçim bu cihazda kilitlenir.</div>
-                <div class="btn-grid" style="grid-template-columns:1fr 1fr 1fr;">
-                    ${BEKLENEN_JURILER.map(j=>`<button class="btn" onclick="juriOturumuKilitle('${j}')">${j}</button>`).join('')}
-                </div>
+        const juriHtml = `
+            <div id="juriOturumPanel" class="kriter-card" style="border-color:#365174;">
+                <div style="font-size:13px;color:#cbd5e1;">Maç seçildiğinde yalnızca o günün ve kategorinin <b>3 asıl jüri adı</b> listelenir. Yedek jüri bu seçim listesinde gösterilmez.</div>
             </div>`;
         document.getElementById('app').innerHTML = `
             <div class="card" style="max-width:930px;">
@@ -832,6 +840,7 @@
                 <button class="btn" style="background:var(--primary);border:none;margin-top:25px;font-size:16px;padding:16px;" onclick="puanlamaSayfasinaGec()" ${oturum?'':'disabled'}>Kriterleri Puanla →</button>
                 <button class="btn" style="background:#475569;" onclick="anaMenu()">← Ana Menü</button>
             </div>`;
+        void juriPaneliniGuncelle();
         void puanlamaVerileriniYukle();
     }
 
@@ -907,6 +916,126 @@
         }catch(err){alert('Öğrenci eşleştirmesi kaydedilemedi: '+String(err?.message||err));}
     }
 
+    // Jüri seçimi, seçili maçın günü ve kategorisindeki üç asıl jüri üzerinden yapılır.
+    // Cihaz kilidi başka güne aitse rolü yeni güne otomatik taşımayız; jüri kilidi kaldırıp
+    // o günün listesinden kendi adını seçmelidir. Yedek jüri puanlama listesine eklenmez.
+    let juriPanelYuklemeSurumu = 0;
+    function juriSecimBaglami(mac) {
+        if (!mac) return null;
+        const tarih = mac.fiksturTarih || mac.tarih || '';
+        const gunKey = raporFiksturTarihAnahtari(tarih);
+        if (!gunKey) return null;
+        return { gunKey, gunLabel: tarih || gunKey, kategori: secimler.kategori === 'LİSE' ? 'lise' : 'ortaokul' };
+    }
+    function juriOturumuSeciliMacaUygun(oturum, mac) {
+        const b = juriSecimBaglami(mac);
+        return !!(oturum && b && oturum.gunKey === b.gunKey && oturum.kategori === b.kategori &&
+            ['1. Jüri','2. Jüri','3. Jüri'].includes(oturum.juri));
+    }
+    function juriPanelMetin(panel, metin, hata=false) {
+        const d = document.createElement('div');
+        d.style.cssText = `font-size:13px;line-height:1.55;color:${hata?'#fed7aa':'#cbd5e1'};`;
+        d.textContent = metin;
+        panel.appendChild(d);
+    }
+    async function juriPaneliniGuncelle(mac=null) {
+        const panel = document.getElementById('juriOturumPanel');
+        if (!panel) return;
+        const yuklemeSurumu = ++juriPanelYuklemeSurumu;
+        const aktifMac = mac || puanlamaMaclar.get(secimler.macId) || null;
+        const baglam = juriSecimBaglami(aktifMac);
+        const oturum = juriOturumuGetir();
+        panel.replaceChildren();
+
+        if (oturum) {
+            const ust = document.createElement('div');
+            ust.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;';
+            const metin = document.createElement('div');
+            const label = document.createElement('div');
+            label.style.cssText = 'font-size:11px;color:var(--text-muted);text-transform:uppercase;';
+            label.textContent = 'Bu cihazın jüri kilidi';
+            const ad = document.createElement('b');
+            ad.style.color = '#34d399';
+            ad.textContent = `${oturum.juri} · ${oturum.ad}`;
+            metin.append(label, ad);
+            const kilit = document.createElement('button');
+            kilit.className = 'btn';
+            kilit.style.cssText = 'width:auto;padding:8px 12px;margin:0;background:#475569;';
+            kilit.textContent = 'Jüri Kilidini Kaldır 🔒';
+            kilit.onclick = juriOturumunuSifirla;
+            ust.append(metin, kilit);
+            panel.appendChild(ust);
+            const uyumlu = juriOturumuSeciliMacaUygun(oturum, aktifMac);
+            if (baglam && !uyumlu) {
+                juriPanelMetin(panel, `Bu kilit ${oturum.gunLabel || oturum.gunKey || 'önceki bir oturum'} için kayıtlı. Seçili maç ${baglam.gunLabel} · ${baglam.kategori === 'lise' ? 'Lise' : 'Ortaokul'}. Bugünün jüri listesine geçmek için kilidi kaldırıp kendi adınızı seçin. Puanlama bu kilitle açılamaz.`, true);
+            } else if (uyumlu) {
+                juriPanelMetin(panel, `${baglam.gunLabel} · ${baglam.kategori === 'lise' ? 'Lise' : 'Ortaokul'} oturumu. Başka bir jüri kullanacaksa kilidi kaldırıp bugünün listesinden adını seçebilir.`);
+            } else {
+                juriPanelMetin(panel, 'Maç seçildiğinde bu kilidin o gün ve kategoriye uygunluğu kontrol edilir. Farklı bir jüri kullanacaksa kilidi kaldırın.');
+            }
+            return;
+        }
+
+        if (!baglam) {
+            juriPanelMetin(panel, 'Önce tarihi belli bir maç seçin. Ardından yalnızca o günün 3 asıl jüri adı görüntülenir; yedek jüri listelenmez.');
+            return;
+        }
+        const baslik = document.createElement('div');
+        baslik.style.cssText = 'font-size:13px;font-weight:750;margin-bottom:8px;color:#f8fafc;';
+        baslik.textContent = `${baglam.gunLabel} · ${baglam.kategori === 'lise' ? 'Lise' : 'Ortaokul'} — kendi adınızı seçin`;
+        panel.appendChild(baslik);
+        const aciklama = document.createElement('div');
+        aciklama.style.cssText = 'font-size:11px;color:var(--text-muted);margin-bottom:10px;';
+        aciklama.textContent = 'Yalnızca 1., 2. ve 3. asıl jüri listelenir. Yedek jüri otomatik seçilmez.';
+        panel.appendChild(aciklama);
+        try {
+            const snap = await db.ref(`fikstur/tekSalon_2026_2027/juries/${baglam.gunKey}/${baglam.kategori}`).once('value');
+            if (yuklemeSurumu !== juriPanelYuklemeSurumu || !document.getElementById('juriOturumPanel')) return;
+            const roster = snap.val() || {};
+            const roller = [
+                ['1. Jüri','asil1','1. Asıl jüri'],
+                ['2. Jüri','asil2','2. Asıl jüri'],
+                ['3. Jüri','asil3','3. Asıl jüri']
+            ];
+            const grid = document.createElement('div');
+            grid.className = 'btn-grid';
+            grid.style.cssText = 'grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0;';
+            let sayi = 0;
+            for (const [rol, anahtar, rolAd] of roller) {
+                const kisi = roster[anahtar] || {};
+                const isim = puanMetniNormalize(kisi.name || '');
+                if (!isim || /^(protokol|belirlenecek|[-—]+)$/i.test(isim)) continue;
+                const btn = document.createElement('button');
+                btn.className = 'btn';
+                btn.style.cssText = 'margin:0;min-width:0;white-space:normal;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:82px;';
+                const rolSpan = document.createElement('span');
+                rolSpan.style.cssText = 'font-size:11px;color:#93c5fd;';
+                rolSpan.textContent = rolAd;
+                const isimSpan = document.createElement('strong');
+                isimSpan.style.cssText = 'font-size:13px;overflow-wrap:anywhere;';
+                isimSpan.textContent = isim;
+                btn.append(rolSpan, isimSpan);
+                if (kisi.school && kisi.school !== '-') {
+                    const okul = document.createElement('span');
+                    okul.style.cssText = 'font-size:10px;color:var(--text-muted);';
+                    okul.textContent = kisi.school;
+                    btn.appendChild(okul);
+                }
+                btn.onclick = () => { void juriOturumuKilitle(rol, isim); };
+                grid.appendChild(btn);
+                sayi++;
+            }
+            if (!sayi) {
+                juriPanelMetin(panel, 'Bu gün ve kategori için üç asıl jüri adı okunamadı veya görevlendirmeler henüz kesinleşmemiş. Yedek jüri otomatik olarak kullanılmadı.', true);
+            } else {
+                panel.appendChild(grid);
+            }
+        } catch (err) {
+            if (yuklemeSurumu !== juriPanelYuklemeSurumu) return;
+            juriPanelMetin(panel, 'Günün jüri listesi yüklenemedi. İnternet bağlantısını kontrol edip maç listesini yenileyin.', true);
+        }
+    }
+
     async function merkeziMacSecildi(yuklemeden=false) {
         const el=document.getElementById('aktifMac');const id=el?.value||'';
         const m=puanlamaMaclar.get(id);
@@ -914,15 +1043,19 @@
             secimler.macId='';secimler.hukOkul='';secimler.muhOkul='';secimler.ogr='';secimler.okul='';
             secimleriKaydet();puanlamaManuelOkulSecenekleri();
             puanlamaKaynakPaneliniGuncelle();
+            void juriPaneliniGuncelle(null);
             ogrencileriYukle();canliJuriTakibiBaslat();return;
         }
         if(m.durum==='iptal')return alert('Bu maç yönetici tarafından iptal edilmiştir. Jüri puanlamasına açılamaz.');
+        const aktif=document.getElementById('aktifMac');
+        if(!aktif||aktif!==el||aktif.value!==id)return; // Bekleme sırasında ekran/maç değiştiyse eski yanıtı uygulama.
         const degisti=secimler.macId!==id || secimler.hukOkul!==m.hukOkul || secimler.muhOkul!==m.muhOkul;
         secimler.macId=id;secimler.hukOkul=m.hukOkul;secimler.muhOkul=m.muhOkul;
         if(degisti){secimler.ogr='';secimler.okul='';}
         secimleriKaydet();
         puanlamaManuelOkulSecenekleri();
         puanlamaKaynakPaneliniGuncelle();
+        void juriPaneliniGuncelle(m);
         if(secimler.taraf)ogrencileriYukle();
         else {const box=document.getElementById('ogrenciButonAlani');if(box)box.textContent='Hükümet veya muhalefet tarafını seçin.';}
         canliJuriTakibiBaslat();
@@ -1205,6 +1338,8 @@
         secimler.juriAd = oturum.ad;
         if(!secimler.taraf || !secimler.juri || !secimler.ogr || !secimler.okul || !secimler.hukOkul || !secimler.muhOkul) return alert('Lütfen seçimleri eksiksiz yapın!');
         const fixtureMac=puanlamaMaclar.get(secimler.macId);
+        if(!juriOturumuSeciliMacaUygun(oturum,fixtureMac))
+            return alert('Bu jüri kilidi seçili maçın günü/kategorisi için geçerli değil. “Jüri Kilidini Kaldır” düğmesiyle kilidi kaldırın ve günün asıl jüri listesinden kendi adınızı seçin.');
         const source=fixtureMac?puanlamaKaynakAdi(fixtureMac,secimler.taraf):puanlamaTamOkulEslesmesi(secimler.okul);
         if(!source || !(puanlamaKayitliOkullar[source]||[]).length)
             return alert('Bu okulun öğrenci listesi bulunamadı. Önce öğrenci kayıtlarını kontrol edin veya okul eşleştirmesini kaydedin.');
@@ -1255,7 +1390,10 @@
         if (puanGonderiliyor) return;
         if(Object.keys(verilenPuanlar).length < 13) return alert('Lütfen tüm 13 kriteri puanlayın!');
         const oturum = juriOturumuGetir();
-        if (!oturum) return alert('Jüri oturumu kilidi bulunamadı.');
+        if (!oturum) return alert('Günün jüri listesinden adınızı seçip kilitleyin.');
+        const seciliFixture = puanlamaMaclar.get(secimler.macId);
+        if(!juriOturumuSeciliMacaUygun(oturum,seciliFixture))
+            return alert('Jüri kilidi seçili maçın günü/kategorisi için geçerli değil. Kilidi kaldırıp günün asıl jüri listesinden kendi adınızı seçin.');
         secimler.juri = oturum.juri;
         secimler.juriAd = oturum.ad;
         const mac = mevcutMacBilgisi();
@@ -1382,11 +1520,11 @@
                 <div id="raporJuriKontrolKart" class="kriter-card" style="margin-bottom:18px;"><h3 style="margin-top:0; color:var(--text-main);">Jüri Tamamlama Kontrolü</h3><div id="juryCoverage" style="overflow-x:auto;">Hesaplanıyor...</div></div>
                 <div class="no-print" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:15px;">
                     <button class="btn" style="background:var(--success);border:none;margin:0;" onclick="raporuExcelIndir()">Excel İndir (.xlsx)</button>
-                    <button class="btn" style="background:var(--primary);border:none;margin:0;" onclick="raporTakimYazdir()">Tüm Maçlar · Toplu İmza / PDF</button>
+                    <button class="btn" style="background:var(--primary);border:none;margin:0;" onclick="raporTakimYazdir()">Seçili Gün · Tutanak / PDF</button>
                     <button class="btn" style="background:#475569;margin:0;" onclick="renderYoneticiMenu()">Kapat</button>
                 </div>
-                <p class="report-print-note no-print">Ekranda takım bazlı sonuçlar görünür; öğrenci ve 13 kriter ayrıntısı altta isteğe bağlı açılır. Yazdırma, maç filtresinden bağımsız olarak <b>tüm karşılaşmaları tek yatay imza sayfasına</b> yerleştirir (çok maç olduğunda A3). Jüri isimleri önce kaydedilmiş puanlardan, bulunmuyorsa Firebase fikstür görevlendirmelerinden alınır.</p>
-                <select id="macFiltre" style="margin-bottom:20px;" class="no-print" onchange="tutanakTablosuDoldur()"><option value="hepsi">Tüm Maçların Genel Raporu</option></select>
+                <p class="report-print-note no-print">Tutanak, seçilen tarihteki karşılaşmaları ve öğrenci puan ayrıntılarını içerir. PDF çıktısı yalnızca seçili gün için hazırlanır. Genel rapor için “Tüm Günler” seçeneği kullanılabilir. Jüri isimleri önce kaydedilmiş puanlardan, bulunmuyorsa Firebase fikstür görevlendirmelerinden alınır.</p>
+                <div class="no-print" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:20px;"><label id="gunFiltreLabel" for="gunFiltre" style="font-size:13px;font-weight:700;white-space:nowrap;">Tutanak günü:</label><select id="gunFiltre" style="margin:0;max-width:500px;flex:1;" onchange="tutanakTablosuDoldur()"><option value="">Günler yükleniyor…</option></select></div>
                 <div id="rapor-tablosu" style="overflow-x:auto;">Veriler derleniyor...</div>
                 <section id="raporKompaktYazdir" class="print-only" aria-label="Kompakt puan tutanağı"></section>
 
@@ -1398,7 +1536,7 @@
                 db.ref('maclar/' + kat).once('value'),
                 db.ref('fikstur/tekSalon_2026_2027').once('value').catch(err=>{console.warn('Rapor fikstür/isim yedeği okunamadı:',err);return null;})
             ]);
-            if(!document.getElementById('macFiltre') || secimler.kategori!==kat)return;
+            if(!document.getElementById('gunFiltre') || secimler.kategori!==kat)return;
             const kayitlar = snapshotKayitlariniTekillestir(s);
             const maclarMap = {};
             mSnap.forEach(c=>{maclarMap[c.key]=c.val();});
@@ -1406,7 +1544,7 @@
             // Fikstür kapsamı: mevcut maçları kaybetmeden sahadaki tüm gerçek eşleşmeleri göster.
             try{
                 const macListesi=await puanlamaFiksturMaclariniOku();
-                if(!document.getElementById('macFiltre') || secimler.kategori!==kat)return;
+                if(!document.getElementById('gunFiltre') || secimler.kategori!==kat)return;
                 for(const f of macListesi){
                     if(f.cat!==(kat==='LİSE'?'lise':'ortaokul') || !puanlamaGecerliFiksturMaci(f))continue;
                     const id=macKimligiOlustur(kat,f.team1,f.team2);
@@ -1422,7 +1560,6 @@
     }
 
     function raporVerisiniIsle(kayitlar, maclarMap, resmiFikstur={}) {
-        const filtre = document.getElementById('macFiltre');
         const mSet = new Map();
         const ogrenciPuanlari = {};
         const okulPuanlari = {};
@@ -1454,9 +1591,6 @@
             if(m?.hukOkul && m?.muhOkul && !mSet.has(id))
                 mSet.set(id,m.etiket||macEtiketi(m.hukOkul,m.muhOkul));
         });
-        if(filtre) {
-            [...mSet.entries()].sort((a,b)=>a[1].localeCompare(b[1],'tr')).forEach(([id,lbl])=>filtre.innerHTML += `<option value="${htmlEscape(id)}">${htmlEscape(lbl)}</option>`);
-        }
         const siraliList = Object.keys(ogrenciPuanlari).map(isim=>({isim,ortalama:Number((ogrenciPuanlari[isim].skor/ogrenciPuanlari[isim].sayac).toFixed(1)),juriSayisi:ogrenciPuanlari[isim].sayac})).sort((a,b)=>b.ortalama-a.ortalama);
         const podium=document.getElementById('mvp-podium');
         if(siraliList.length){podium.innerHTML=''; for(let i=0;i<Math.min(3,siraliList.length);i++) podium.innerHTML += `<div class="summary-row"><span class="summary-name">${htmlEscape(siraliList[i].isim.split(' (')[0])}</span><span class="summary-score">${siraliList[i].ortalama.toFixed(1)} Ort.</span></div>`;} else podium.innerHTML='Veri yok.';
@@ -1471,11 +1605,48 @@
         const coverage=document.getElementById('juryCoverage');
         if(coverage){let html='<table class="tutanak-table"><tr><th>Maç</th><th>Okul</th><th>Öğrenci</th><th>Jüri Durumu</th><th>Eksik Jüri</th><th>Ortalama</th></tr>'; juriRows.forEach(x=>{const eksikler=BEKLENEN_JURILER.filter(j=>!x.juriler.has(j)); const tam=!eksikler.length; const ort=x.sayac?(x.toplam/x.sayac).toFixed(1):'-'; html += `<tr><td>${htmlEscape(x.mac)}</td><td>${htmlEscape(x.okul)}</td><td>${htmlEscape(x.ogrenci)}</td><td class="${tam?'jury-ok':'jury-missing'}">${x.juriler.size}/3</td><td>${tam?'—':htmlEscape(eksikler.join(', '))}</td><td>${ort}</td></tr>`;}); coverage.innerHTML=html+'</table>';}
         sonRaporVerisi={kategori:secimler.kategori,kayitlar,juriRows,siraliList,siraliOkullar,maclarMap,resmiFikstur};
+        raporGunSecenekleriniDoldur();
         tutanakTablosuDoldur();
     }
 
-    // V3.20 - Resmî takım puan tutanağı: öğrenci kayıtları ayrıntıda korunur.
+    // V3.21 - Gün seçmeli resmî takım puan tutanağı: öğrenci kayıtları ayrıntıda korunur.
     // Resmî galip veya kesinleşmiş puanlar ham jüri puanlarıyla asla değiştirilmez.
+    function raporYerelBugunAnahtari() {
+        const d=new Date();
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+
+    function raporGunAnahtariSatirdan(m) {
+        return raporFiksturTarihAnahtari(m?.fiksturTarih||m?.tarih||'');
+    }
+
+    function raporGunFiltresineUyar(m, secili= document.getElementById('gunFiltre')?.value||'hepsi') {
+        if(secili==='hepsi')return true;
+        const tarih=raporGunAnahtariSatirdan(m);
+        return secili==='tarihsiz' ? !tarih : tarih===secili;
+    }
+
+    function raporGunSecenekleriniDoldur() {
+        const select=document.getElementById('gunFiltre');
+        if(!select||!sonRaporVerisi)return;
+        const onceki=select.value;
+        const gunler=new Map();
+        for(const r of raporTakimVerisiniDerle(sonRaporVerisi)){
+            const raw=String(r.m?.fiksturTarih||r.m?.tarih||'').trim();
+            const key=raporGunAnahtariSatirdan(r.m);
+            if(key){if(!gunler.has(key))gunler.set(key,raw||key);}
+            else if(!gunler.has('tarihsiz'))gunler.set('tarihsiz','Tarihi henüz belirlenmeyen maçlar');
+        }
+        const tarihli=[...gunler.entries()].filter(([k])=>k!=='tarihsiz').sort((a,b)=>a[0].localeCompare(b[0]));
+        let html='<option value="hepsi">Tüm Günler (genel rapor)</option>';
+        for(const [key,label] of tarihli)html+=`<option value="${htmlEscape(key)}">${htmlEscape(label)}</option>`;
+        if(gunler.has('tarihsiz'))html+=`<option value="tarihsiz">${htmlEscape(gunler.get('tarihsiz'))}</option>`;
+        select.innerHTML=html;
+        const mevcutGecerli=onceki && [...select.options].some(o=>o.value===onceki);
+        const ilkGun=tarihli[0]?.[0]||(gunler.has('tarihsiz')?'tarihsiz':'hepsi');
+        select.value=mevcutGecerli?onceki:(gunler.has(raporYerelBugunAnahtari())?raporYerelBugunAnahtari():ilkGun);
+    }
+
     function raporFiksturTarihAnahtari(tarih) {
         const s=String(tarih||'').trim();
         const iso=s.match(/(20\d{2})-(\d{1,2})-(\d{1,2})/);
@@ -1578,11 +1749,13 @@
     function raporKompaktYazdirDoldur() {
         const host=document.getElementById('raporKompaktYazdir');
         if(!host||!sonRaporVerisi)return;
-        const rows=raporTakimVerisiniDerle();
+        const secili=document.getElementById('gunFiltre')?.value||'hepsi';
+        const rows=raporTakimVerisiniDerle().filter(r=>raporGunFiltresineUyar(r.m,secili));
+        const gunEtiketi=document.getElementById('gunFiltre')?.selectedOptions?.[0]?.textContent||'Tüm Günler';
         let html=`<header class="toplu-print-head"><h2>T.C. IĞDIR İL MİLLÎ EĞİTİM MÜDÜRLÜĞÜ</h2>
-            <h3>OKULLAR ARASI MÜNAZARA TURNUVASI · TOPLU TAKIM SONUÇ VE İMZA TUTANAĞI</h3>
-            <p><strong>${htmlEscape(sonRaporVerisi.kategori)}</strong> &nbsp;|&nbsp; ${new Date().toLocaleDateString('tr-TR')}
-            &nbsp;|&nbsp; ${rows.length} karşılaşma &nbsp;|&nbsp; Tüm karşılaşmalar tek tutanak</p></header>`;
+            <h3>OKULLAR ARASI MÜNAZARA TURNUVASI · TAKIM SONUÇ VE İMZA TUTANAĞI</h3>
+            <p><strong>${htmlEscape(sonRaporVerisi.kategori)}</strong> &nbsp;|&nbsp; <strong>Tutanak Günü: ${htmlEscape(gunEtiketi)}</strong>
+            &nbsp;|&nbsp; ${rows.length} karşılaşma</p></header>`;
         html+=raporTakimTablosuHtml(rows,true);
         html+=`<footer class="toplu-print-footer">
             <p><b>H / M:</b> Hükümet / Muhalefet. Jüri sütunları ilgili jüriye ait öğrenci puanlarının takım toplamıdır.
@@ -1618,15 +1791,16 @@
         if(!adminYetkiliMi())return;
         const root=document.getElementById('rapor-tablosu');
         if(!root||!sonRaporVerisi)return;
-        const secili=document.getElementById('macFiltre')?.value||'hepsi';
-        const rows=raporTakimVerisiniDerle().filter(x=>secili==='hepsi'||x.id===secili);
+        const secili=document.getElementById('gunFiltre')?.value||'hepsi';
+        const rows=raporTakimVerisiniDerle().filter(x=>raporGunFiltresineUyar(x.m,secili));
         let html=`<h3 style="color:var(--text-main)">Takım Bazlı Puan ve Sonuç Özeti</h3>
             <div class="puanlama-bilgi">Her maç tek satırdır. Süreler takım toplamıdır. Jüri adı önce sistemdeki gerçek puan kaydından, yoksa resmî fikstür görevlendirmesinden alınır. Kesinleşmemiş skorlar resmî sonuç değildir.</div>`;
         html+=`<div style="overflow-x:auto">${raporTakimTablosuHtml(rows)}</div>`;
         html+='<details class="ogrenci-detay-karti no-print"><summary>Öğrenci Bazlı Ayrıntılı Kayıtları Göster (13 kriter ve jüri puanları)</summary>';
         html+='<div style="overflow-x:auto"><table class="tutanak-table"><tr><th>Taraf</th><th>Okul</th><th>Öğrenci</th><th>Jüri No</th><th>Jüri Adı</th>'+krit.map((k,i)=>`<th>${i+1}</th>`).join('')+'<th>Toplam</th></tr>';
         for(const v of sonRaporVerisi.kayitlar){
-            if(secili!=='hepsi'&&kayitMacId(v)!==secili)continue;
+            const kayitMac=sonRaporVerisi.maclarMap?.[kayitMacId(v)]||{};
+            if(!raporGunFiltresineUyar(kayitMac,secili))continue;
             const p=krit.map((_k,i)=>v.puanlar?.[i]??v.puanlar?.[String(i)]??'—');
             html+=`<tr><td>${htmlEscape(v.secim?.taraf||'')}</td><td>${htmlEscape(v.secim?.okul||'')}</td>
                 <td>${htmlEscape((v.secim?.ogr||'').split(' (')[0])}</td><td>${htmlEscape(v.secim?.juri||'')}</td>
@@ -1634,7 +1808,7 @@
                 <td><b>${puanToplami(v)}</b></td></tr>`;
         }
         root.innerHTML=html+'</table></div></details>';
-        // Seçili maç olsa bile yazdırma HER ZAMAN tüm maçları içerir.
+        // Ekrandaki günlük seçim ile PDF tutanağı aynı gün kapsamını kullanır.
         raporKompaktYazdirDoldur();
     }
 
@@ -4139,7 +4313,7 @@
         if(document.getElementById('ortakKonusmaSayaci'))return renderPuanlamaSecim();
         if(document.getElementById('aktifMac'))return anaMenu();
         if(document.getElementById('sureHizliMacSec'))return window.sureEkraniGirisKaynak==='yonetici'?renderYoneticiCanliPanel():renderPuanlamaSecim();
-        if(document.getElementById('liveMatches')||document.getElementById('macFiltre')||
+        if(document.getElementById('liveMatches')||document.getElementById('gunFiltre')||
            document.getElementById('ogrenciListesi')||document.getElementById('turnuvaFiksturFrame')||
            app.querySelector('.fixture-shell'))return renderYoneticiMenu();
         const title=(app.querySelector('h1,h2')?.textContent||'').toLocaleLowerCase('tr-TR');
