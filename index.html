@@ -215,6 +215,13 @@
         .toplu-print-footer {color:#111;max-width:100%;font-size:7pt;margin-top:7px;line-height:1.35;}
         .toplu-print-footer p {margin:0 0 6px;}
         .toplu-komisyon {display:flex;justify-content:space-between;gap:8px;font-size:8pt;margin-top:14px;}
+        /* V3.29: Sonuç merkezinde günün/aktif maçının satırı otomatik odaklanır. */
+        #rapor-tablosu tr.rapor-otomatik-hedef td {
+            background:rgba(59,130,246,.25) !important;
+            border-top:2px solid #60a5fa !important;
+            border-bottom:2px solid #60a5fa !important;
+        }
+        #rapor-tablosu tr.rapor-otomatik-hedef td:first-child {border-left:3px solid #60a5fa !important;}
         @media print {
             @page { size:A3 landscape; margin:6mm 7mm; }
             #app .report-outer-card {display:block !important;margin:0 !important;padding:0 !important;width:100% !important;max-width:none !important;}
@@ -279,7 +286,7 @@
 </div>
 
 <script>
-    const APP_VERSION = '3.27 · Sağda Sabit Sayaç ve Bağımsız Jüri Kaydı';
+    const APP_VERSION = '3.29 · Sonuçlarda Günün Maçına Otomatik Odak';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -903,6 +910,82 @@
         };
     }
 
+    // Cihazın yerel tarih/saatine göre mevcut veya sıradaki açık resmî maçı bulur.
+    // Tek salon fikstüründe aynı anda iki maç seçmek riskli olduğundan eşit/çakışan
+    // başlangıçlarda rastgele seçim yapmaz; ilgili alanı jüriye manuel seçtirir.
+    function puanlamaMacSaatAraliginiCoz(m) {
+        const tarihKey = raporFiksturTarihAnahtari(m?.fiksturTarih || m?.tarih || '');
+        const saatMetni = String(m?.fiksturSaat || m?.time || '');
+        const saat = saatMetni.match(/(\d{1,2}):(\d{2})\s*[-–]\s*(\d{1,2}):(\d{2})/);
+        if (!tarihKey || !saat) return null;
+        const [y, mo, d] = tarihKey.split('-').map(Number);
+        const baslangic = new Date(y, mo - 1, d, Number(saat[1]), Number(saat[2]), 0, 0).getTime();
+        const bitis = new Date(y, mo - 1, d, Number(saat[3]), Number(saat[4]), 0, 0).getTime();
+        if (!Number.isFinite(baslangic) || !Number.isFinite(bitis) || bitis <= baslangic) return null;
+        return { tarihKey, baslangic, bitis };
+    }
+
+    function puanlamaYerelBugunKeyi(zamanDamgasi=Date.now()) {
+        const n = new Date(zamanDamgasi);
+        return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;
+    }
+
+    async function puanlamaSunucuSaatiniGetir() {
+        // Cihaz saati hatalıysa Firebase'in saat farkını kullan; bağlantı yoksa yerel saate dön.
+        try {
+            const snap = await db.ref('.info/serverTimeOffset').once('value');
+            const fark = Number(snap.val());
+            if (Number.isFinite(fark)) return Date.now() + fark;
+        } catch (err) {
+            console.warn('Sunucu saat farkı okunamadı; cihaz saati kullanılacak:', err);
+        }
+        return Date.now();
+    }
+
+    function puanlamaSaatineGoreOtomatikMacBul(simdi=Date.now()) {
+        const bugun = puanlamaYerelBugunKeyi(simdi);
+        const adaylar = [...puanlamaMaclar.values()]
+            .filter(m => m?.fiksturNo && m.kategori === secimler.kategori && !['kapali','iptal'].includes(m.durum))
+            .map(m => {
+                const aralik = puanlamaMacSaatAraliginiCoz(m);
+                return aralik ? { id: m.id || macKimligiOlustur(m.kategori,m.hukOkul,m.muhOkul), m, ...aralik } : null;
+            })
+            .filter(Boolean);
+        if (!adaylar.length) return '';
+
+        const benzersizIlk = liste => {
+            if (!liste.length) return '';
+            liste.sort((a,b)=>a.baslangic-b.baslangic || a.bitis-b.bitis);
+            // Aynı zaman diliminde birden çok aday varsa yanlış maçı otomatik seçme.
+            if (liste.length > 1 && liste[0].baslangic === liste[1].baslangic) return '';
+            return liste[0].id;
+        };
+        const aktif = adaylar.filter(a => a.baslangic <= simdi && simdi <= a.bitis);
+        if (aktif.length) return benzersizIlk(aktif);
+
+        const bugununSiradaki = adaylar.filter(a => a.tarihKey === bugun && a.baslangic > simdi);
+        const siradakiBugunId = benzersizIlk(bugununSiradaki);
+        if (siradakiBugunId) return siradakiBugunId;
+
+        // Bugünkü açık maçların saati geçmişse önce bugünün son açık maçını seç.
+        const bugununGecmisi = adaylar.filter(a => a.tarihKey === bugun && a.bitis < simdi)
+            .sort((a,b)=>b.baslangic-a.baslangic);
+        if (bugununGecmisi.length) {
+            if (bugununGecmisi.length > 1 && bugununGecmisi[0].baslangic === bugununGecmisi[1].baslangic) return '';
+            return bugununGecmisi[0].id;
+        }
+
+        const gelecektekiler = adaylar.filter(a => a.baslangic > simdi).sort((a,b)=>a.baslangic-b.baslangic);
+        const siradakiGenelId = benzersizIlk(gelecektekiler);
+        if (siradakiGenelId) return siradakiGenelId;
+
+        // Takvimde geriye dönük açık kayıt kaldıysa en sonuncuyu seç; kapalı maçlar aday değildir.
+        const gecmis = adaylar.filter(a => a.bitis < simdi).sort((a,b)=>b.baslangic-a.baslangic);
+        if (!gecmis.length) return '';
+        if (gecmis.length > 1 && gecmis[0].baslangic === gecmis[1].baslangic) return '';
+        return gecmis[0].id;
+    }
+
     async function puanlamaVerileriniYukle() {
         const surum=puanlamaYuklemeSurumu,kat=secimler.kategori;
         const [oRes,mRes]=await Promise.allSettled([
@@ -950,15 +1033,36 @@
             }).join('')+
             (ekMaclar.length?'<optgroup label="Eski / manuel puanlama kayıtları">'+ekMaclar.map(m=>`<option value="${htmlEscape(m.id)}">${htmlEscape(m.etiket||macEtiketi(m.hukOkul,m.muhOkul))}</option>`).join('')+'</optgroup>':'');
         const oncekiMac=secimler.macId;
-        if(oncekiMac && [...select.options].some(x=>x.value===oncekiMac)){
-            select.value=oncekiMac;
-            // Önceki ekranın kapatılmasından kalan seçimi güvenle geri yükle.
+        const otomatikSimdi=await puanlamaSunucuSaatiniGetir();
+        if(surum!==puanlamaYuklemeSurumu || document.getElementById('aktifMac')!==select)return;
+        const otomatikMacId=puanlamaSaatineGoreOtomatikMacBul(otomatikSimdi);
+        const otomatikMacSecenegi=otomatikMacId ? [...select.options].find(x=>x.value===otomatikMacId && !x.disabled) : null;
+        const oncekiMacSecenegi=oncekiMac ? [...select.options].find(x=>x.value===oncekiMac && !x.disabled) : null;
+        if(otomatikMacSecenegi){
+            // Her açılışta eski günün seçimini sürdürmek yerine saatine uygun maça geç.
+            select.value=otomatikMacId;
             await merkeziMacSecildi(true);
+        }else if(oncekiMacSecenegi){
+            const oncekiKayit=puanlamaMaclar.get(oncekiMac);
+            const oncekiZaman=puanlamaMacSaatAraliginiCoz(oncekiKayit);
+            // Otomatik eşleşme çözülemezse yalnızca manuel kayıtları veya bugüne ait
+            // açık bir maçı koru; önceki günün maçını fark ettirmeden seçili bırakma.
+            if(!oncekiKayit?.fiksturNo || (oncekiZaman?.tarihKey===puanlamaYerelBugunKeyi() && !['kapali','iptal'].includes(oncekiKayit?.durum))){
+                select.value=oncekiMac;
+                await merkeziMacSecildi(true);
+            }else{
+                secimler.macId='';secimler.ogr='';secimler.okul='';
+                secimler.hukOkul='';secimler.muhOkul='';secimleriKaydet();
+                puanlamaManuelOkulSecenekleri();
+                puanlamaKaynakPaneliniGuncelle();
+                void juriPaneliniGuncelle(null);
+            }
         }else{
             secimler.macId='';secimler.ogr='';secimler.okul='';
             secimler.hukOkul='';secimler.muhOkul='';secimleriKaydet();
             puanlamaManuelOkulSecenekleri();
             puanlamaKaynakPaneliniGuncelle();
+            void juriPaneliniGuncelle(null);
         }
         const stuCount=Object.values(puanlamaKayitliOkullar).reduce((n,a)=>n+a.length,0);
         const durum=`Sabit fikstür: ${donenler} gerçek ${kat.toLocaleLowerCase('tr-TR')} maçı · Öğrenci listesi: ${puanlamaOkulAdlari().length} okul / ${stuCount} öğrenci.`;
@@ -1012,6 +1116,7 @@
                 </div>
                 <label for="aktifMac" class="puanlama-etiket">Maç seç</label>
                 <select id="aktifMac" onchange="merkeziMacSecildi()"><option value="">Fikstür maçları yükleniyor…</option></select>
+                <div style="font-size:11px;line-height:1.45;color:#93c5fd;margin:2px 0 7px;">Maç, cihazın tarih ve saatine göre otomatik seçilir: önce şu anki seans, ardından bugünün sıradaki açık maçı. Gerekirse bu listeden başka maç seçebilirsiniz.</div>
                 <div id="seciliMacBilgisi" style="color:#94a3b8;font-size:12px;margin:5px 0 12px;">Maç seçildiğinde hükümet ve muhalefet okulları otomatik belirlenecek.</div>
                 <details class="puanlama-manuel"><summary>Gerektiğinde okulları manuel seç</summary>
                     <select id="hukOkul" onchange="macOkulDegisti('hukOkul')"><option value="">Hükümet Okul Seçiniz</option></select>
@@ -2228,7 +2333,7 @@ Devam edilsin mi?`)){
             const sonuc=r.cift?'Galip yok – çift eleme':r.kazanan||r.durum;
             const tarih=r.m.fiksturTarih||'—';
             const sign=imzali?'<td class="imza-bos"></td><td class="imza-bos"></td><td class="imza-bos"></td>':'';
-            html+=`<tr class="${r.sonucVar?'kesin-sonuc':''}"><td>${htmlEscape(r.m.fiksturNo||i+1)}</td>
+            html+=`<tr data-rapor-mac-id="${htmlEscape(r.id)}" class="${r.sonucVar?'kesin-sonuc':''}"><td>${htmlEscape(r.m.fiksturNo||i+1)}</td>
                 <td>${htmlEscape(tarih)}</td><td>${htmlEscape(r.m.hukOkul)}</td><td>${htmlEscape(r.m.muhOkul)}</td>
                 ${data.map(v=>`<td class="num-cell">${v}</td>`).join('')}
                 <td class="num-cell"><b>${r.puanH??'—'}</b>${resmiNot}</td>
@@ -2282,6 +2387,50 @@ Devam edilsin mi?`)){
         window.print();
     }
 
+    // Sonuç ekranı açıldığında veya gün filtresi değiştiğinde görünür tablodaki
+    // aktif maça; yoksa bugünün sıradaki, gün bittiyse son maçına kendiliğinden gider.
+    function raporSonucMacinaOtomatikOdaklan(rows){
+        const root=document.getElementById('rapor-tablosu');
+        if(!root||!Array.isArray(rows)||!rows.length)return;
+        const simdi=Date.now();
+        const bugun=raporYerelBugunAnahtari();
+        const zamanli=rows.map(r=>({r,ar:puanlamaMacSaatAraliginiCoz(r.m)})).filter(x=>x.ar);
+        const aktif=zamanli.filter(x=>x.ar.baslangic<=simdi && simdi<=x.ar.bitis);
+        let hedef=aktif.length===1?aktif[0].r:null;
+        if(!hedef && aktif.length>1){
+            // Çakışan seans varsa rastgele seçme; listede ilk görünen maç kullanılabilir.
+            hedef=aktif.sort((a,b)=>a.ar.baslangic-b.ar.baslangic)[0].r;
+        }
+        if(!hedef){
+            const siradakiBugun=zamanli.filter(x=>x.ar.tarihKey===bugun && x.ar.baslangic>simdi && !['kapali','iptal'].includes(x.r.m?.durum))
+                .sort((a,b)=>a.ar.baslangic-b.ar.baslangic);
+            if(siradakiBugun.length)hedef=siradakiBugun[0].r;
+        }
+        if(!hedef){
+            const gecmisBugun=zamanli.filter(x=>x.ar.tarihKey===bugun && x.ar.bitis<simdi)
+                .sort((a,b)=>b.ar.baslangic-a.ar.baslangic);
+            if(gecmisBugun.length)hedef=gecmisBugun[0].r;
+        }
+        if(!hedef){
+            const siradaki=zamanli.filter(x=>x.ar.baslangic>simdi && !['kapali','iptal'].includes(x.r.m?.durum))
+                .sort((a,b)=>a.ar.baslangic-b.ar.baslangic);
+            if(siradaki.length)hedef=siradaki[0].r;
+        }
+        if(!hedef && zamanli.length){
+            hedef=zamanli.slice().sort((a,b)=>b.ar.baslangic-a.ar.baslangic)[0].r;
+        }
+        if(!hedef)hedef=rows[0];
+        const satir=[...root.querySelectorAll('tr[data-rapor-mac-id]')].find(el=>el.dataset.raporMacId===String(hedef.id));
+        if(!satir)return;
+        root.querySelectorAll('tr.rapor-otomatik-hedef').forEach(el=>el.classList.remove('rapor-otomatik-hedef'));
+        satir.classList.add('rapor-otomatik-hedef');
+        // DOM'un yerleşmesi için kısa gecikme; yönetici aşağı kaydırmak zorunda kalmaz.
+        window.setTimeout(()=>{
+            if(!satir.isConnected)return;
+            satir.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
+        },120);
+    }
+
     function tutanakTablosuDoldur(){
         if(!adminYetkiliMi())return;
         const root=document.getElementById('rapor-tablosu');
@@ -2305,6 +2454,8 @@ Devam edilsin mi?`)){
         root.innerHTML=html+'</table></div></details>';
         // Ekrandaki günlük seçim ile PDF tutanağı aynı gün kapsamını kullanır.
         raporKompaktYazdirDoldur();
+        // Günün / o anki maçının satırını vurgula ve otomatik olarak görünür alana getir.
+        raporSonucMacinaOtomatikOdaklan(rows);
     }
 
     function raporuExcelIndir() {
