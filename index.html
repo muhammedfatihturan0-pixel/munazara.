@@ -225,6 +225,49 @@
             .toplu-print-table th,.toplu-print-table td {-webkit-print-color-adjust:exact;print-color-adjust:exact;}
             html,body {height:auto !important;margin:0 !important;padding:0 !important;overflow:visible !important;}
         }
+    
+
+        /* V3.27: Sayaç puanlama boyunca görünür kalır. Geniş ekranda sağ kenarda sabit;
+           dar ekranda içerik üstünde sticky davranır, kriterleri örtmez. */
+        #ortakKonusmaSayaci { scroll-margin-top: 10px; overflow-wrap: anywhere; }
+        @media (min-width:1240px) {
+            #ortakKonusmaSayaci {
+                position: fixed !important;
+                top: 86px;
+                right: 12px;
+                width: clamp(140px, calc(50vw - 479px), 270px);
+                max-height: calc(100vh - 102px);
+                overflow-y: auto;
+                box-sizing: border-box;
+                margin: 0 !important;
+                padding: 12px !important;
+                z-index: 9997;
+                background: #101f33;
+                border-color: #52739a;
+                box-shadow: 0 12px 32px rgba(0,0,0,.55);
+                overflow-wrap: anywhere;
+            }
+            #ortakKonusmaSayaci .btn {
+                box-sizing: border-box;
+                max-width: 100%;
+                white-space: normal;
+                overflow-wrap: anywhere;
+                text-align: left;
+                font-size: 11px;
+                line-height: 1.35;
+            }
+        }
+        @media (max-width:1239px) {
+            #ortakKonusmaSayaci {
+                position: sticky;
+                top: 8px;
+                z-index: 120;
+                margin: 0 0 12px !important;
+                box-shadow: 0 8px 22px rgba(0,0,0,.42);
+                background: #101f33;
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -236,7 +279,7 @@
 </div>
 
 <script>
-    const APP_VERSION = '3.25 · Jüriler Bağımsız Puan Gönderimi ve Son Dakika Uyarısı';
+    const APP_VERSION = '3.27 · Sağda Sabit Sayaç ve Bağımsız Jüri Kaydı';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -325,6 +368,22 @@
             s.kategori, macId, s.okul, s.ogr, s.juri, s.taraf
         ].map(puanMetniNormalize).join('|').toLocaleLowerCase('tr-TR');
         return 'p_' + hash32(temel, 2166136261) + hash32(temel, 3339675911);
+    }
+
+    // Eski rastgele anahtarlı mükerrer puan kayıtları yalnızca ana puan başarıyla
+    // kaydedildikten sonra arka planda temizlenir; bu işlem başka jüri kayıtlarını etkilemez.
+    function eskiJuriPuanMukerrerleriniTemizle(kategori,kayitId,kanonikAnahtar){
+        void db.ref(`puanlar/${kategori}`).once('value').then(snapshot=>{
+            const silinecek=[];
+            snapshot.forEach(c=>{
+                if(c.key===kanonikAnahtar)return;
+                const v=c.val();
+                if(!v||!v.secim||!v.puanlar)return;
+                if(puanKayitKimligi(v.secim,kayitMacId(v))===kayitId)
+                    silinecek.push(db.ref(`puanlar/${kategori}/${c.key}`).remove());
+            });
+            return Promise.allSettled(silinecek);
+        }).catch(err=>console.warn('Eski mükerrer puanları arka planda temizleme başarısız:',err));
     }
 
     function puanToplami(v) {
@@ -1349,26 +1408,34 @@
             if(typeof offset==='number')ortakSureSunucuFarki=offset;
         }catch(err){console.warn('Ortak süre için sunucu saati eşitlenemedi:',err);}
     }
+    // Eski sürümlerde oluşmuş, gerçek 6 dakika dolmadan kapatılmış sayaçları tanır.
+    // Yalnızca jüri açıkça 'Konuşma bitti' dediyse erken bitiş geçerlidir.
+    function ortakSureErkenKapanmaKaydi(veri){
+        if(!veri || !['bitti','tamamlandi'].includes(veri.durum))return false;
+        if(veri.bitisNedeni==='konusma_bitti')return false;
+        const bas=Number(veri.baslangicAt||0);
+        if(!bas)return false;
+        const bitis=Number(veri.bitisAt||0);
+        return !bitis || bitis < bas + ORTAK_SURE_LIMIT*1000;
+    }
     function ortakPuanSonAt(veri){
         const bas=Number(veri?.baslangicAt||0);
         if(!bas)return 0;
-        // KRİTİK: Eski sürümde bir jürinin puan göndermesi ortak sayacı erken kapatabiliyordu.
-        // Bu eski kayıtlar da gerçek 6 dakikalık sınır + 10 saniyeye kadar geçerli sayılır.
-        if(veri.bitisNedeni==='puanlar_gonderildi')
-            return bas+(ORTAK_SURE_LIMIT+ORTAK_PUAN_EK_SURE)*1000;
-        if(['bitti','tamamlandi'].includes(veri.durum)){
-            const bitis=Number(veri.bitisAt)>0?Number(veri.bitisAt):bas+ORTAK_SURE_LIMIT*1000;
-            return bitis+ORTAK_PUAN_EK_SURE*1000;
+        // Puan gönderimi ve açıklanamayan/eski erken kapanmalar diğer jüriyi kilitlemez.
+        // Normal sınır bütün cihazlarda başlangıç + 6 dakika + 10 saniyedir.
+        if(veri.bitisNedeni==='konusma_bitti'){
+            const bitis=Number(veri.bitisAt||0);
+            if(bitis>0)return bitis+ORTAK_PUAN_EK_SURE*1000;
         }
         return bas+(ORTAK_SURE_LIMIT+ORTAK_PUAN_EK_SURE)*1000;
     }
-    function ortakPuanPenceresiAcik(veri){
+    function ortakPuanPenceresiAcik(veri,kontrolAni=ortakSureSimdi()){
         const son=ortakPuanSonAt(veri);
-        return !!son && ortakSureSimdi()<=son;
+        return !!son && Number(kontrolAni)<=son;
     }
-    function ortakPuanPenceresiKapandi(veri){
+    function ortakPuanPenceresiKapandi(veri,kontrolAni=ortakSureSimdi()){
         const son=ortakPuanSonAt(veri);
-        return !!son && ortakSureSimdi()>son;
+        return !!son && Number(kontrolAni)>son;
     }
     function juriSureDenetimTemeli(extra={}){
         const ot=juriOturumuGetir();
@@ -1534,12 +1601,11 @@ Devam edilsin mi?`)){
     }
     function ortakSureKalan(veri){
         if(!veri)return null;
-        // Eski sürümün puan gönderimi nedeniyle erken kapattığı sayaç, gerçek 6 dakikaya
-        // ulaşana kadar çalışıyor kabul edilir. Yeni puan gönderimleri sayaç durumunu değiştirmez.
-        const eskiPuanGondermeKapanmasi=veri.bitisNedeni==='puanlar_gonderildi';
-        const kapaliDurum=['bitti','tamamlandi'].includes(veri.durum) && !eskiPuanGondermeKapanmasi;
-        const sinir=(!kapaliDurum || veri.durum==='calisiyor' || eskiPuanGondermeKapanmasi)
-            ? ORTAK_SURE_LIMIT : (Number(veri.limitSaniye)||ORTAK_SURE_LIMIT);
+        // Eski sürüm veya başka bir istemci sayacı erken kapattıysa gerçek 6 dakika
+        // dolana kadar çalışan sayaç gibi değerlendir; puan kaydı sayaç durumunu değiştirmez.
+        const eskiErkenKapanma=ortakSureErkenKapanmaKaydi(veri);
+        const kapaliDurum=['bitti','tamamlandi'].includes(veri.durum) && !eskiErkenKapanma;
+        const sinir=!kapaliDurum ? ORTAK_SURE_LIMIT : (Number(veri.limitSaniye)||ORTAK_SURE_LIMIT);
         const gecti=kapaliDurum
             ? Math.max(0,Number(veri.sureSaniye)||0)
             : Math.max(0,Math.floor((ortakSureSimdi()-Number(veri.baslangicAt||0))/1000));
@@ -1608,8 +1674,8 @@ Devam edilsin mi?`)){
         if(!veri)return;
         const s=ortakSureKalan(veri);
         if(!s||s.bitti||s.gecen<ORTAK_SURE_UYARI)return;
-        const eskiPuanGondermeKapanmasi=veri.bitisNedeni==='puanlar_gonderildi';
-        const aktif=veri.durum==='calisiyor'||eskiPuanGondermeKapanmasi;
+        const eskiErkenKapanma=ortakSureErkenKapanmaKaydi(veri);
+        const aktif=veri.durum==='calisiyor'||eskiErkenKapanma;
         if(!aktif)return;
         const anahtar=[kategori,macId,timerId,veri.baslangicAt].join('|');
         if(ortakSureUyariVerilenler.has(anahtar))return;
@@ -1642,8 +1708,8 @@ Devam edilsin mi?`)){
             ortakPuanArayuzunuGuncelle();return;
         }
         const bitti=s.bitti;
-        const eskiPuanGondermeKapanmasi=v?.bitisNedeni==='puanlar_gonderildi';
-        const ortakSayacAktif=v?.durum==='calisiyor'||(eskiPuanGondermeKapanmasi&&!bitti);
+        const eskiErkenKapanma=ortakSureErkenKapanmaKaydi(v);
+        const ortakSayacAktif=v?.durum==='calisiyor'||(eskiErkenKapanma&&!bitti);
         const besDakikaUyarisi=ortakSayacAktif&&s.gecen>=ORTAK_SURE_UYARI;
         const sonAt=ortakPuanSonAt(v);
         const simdi=ortakSureSimdi();
@@ -1660,15 +1726,15 @@ Devam edilsin mi?`)){
             ${!bitti?'<button class="btn" style="width:auto;margin-top:7px;padding:6px 12px;background:#475569" onclick="ortakSureErkenBitir()">⏹ Konuşma bitti — süreyi kaydet</button>':''}
             ${puanKapandi?`<button class="btn" style="width:auto;margin-top:7px;padding:7px 12px;background:#92400e" onclick="juriSurePenceresiniSifirla('puanlama_ekrani')">↻ Sorun varsa ortak süreyi sıfırla</button>`:''}`;
         ortakPuanArayuzunuGuncelle();
-        if(besDakikaUyarisi&&(v.durum==='calisiyor'||eskiPuanGondermeKapanmasi))
+        if(besDakikaUyarisi&&(v.durum==='calisiyor'||eskiErkenKapanma))
             ortakSureBirDakikaUyarisiKontrolEt(v,aktifOrtakSureKimlik?.kategori,aktifOrtakSureKimlik?.macId,aktifOrtakSureKimlik?.id);
         // Sayaç yalnızca gerçek 6 dakika dolduğunda kapanır. Eski sürümün
         // erken puan gönderimiyle kapanmış kayıtları da burada onarılarak tamamlanır.
-        if(bitti&&(v.durum==='calisiyor'||eskiPuanGondermeKapanmasi)&&!ortakSureBittirmeCalisiyor){
+        if(bitti&&(v.durum==='calisiyor'||eskiErkenKapanma)&&!ortakSureBittirmeCalisiyor){
             ortakSureBittirmeCalisiyor=true;
             void aktifOrtakSureRef.transaction(cur=>{
-                const eskiErkenKapanma=cur?.bitisNedeni==='puanlar_gonderildi';
-                if(!cur||!(cur.durum==='calisiyor'||eskiErkenKapanma))return;
+                const erkenKapanma=ortakSureErkenKapanmaKaydi(cur);
+                if(!cur||!(cur.durum==='calisiyor'||erkenKapanma))return;
                 const bas=Number(cur.baslangicAt||0);
                 if(!bas||ortakSureSimdi()<bas+ORTAK_SURE_LIMIT*1000)return;
                 return {...cur,durum:'tamamlandi',limitSaniye:ORTAK_SURE_LIMIT,
@@ -1679,8 +1745,8 @@ Devam edilsin mi?`)){
                 .finally(()=>{ortakSureBittirmeCalisiyor=false;});
         }
     }
-    // Geriye dönük uyumluluk: eski çevrimdışı kuyruklarda sureBitirmeIstek bulunabilir.
-    // Bir jüri puan gönderdi diye ortak süre ASLA bitirilmez; yalnızca sayaç okunur.
+    // Geriye dönük uyumluluk: bu yardımcı artık yalnızca süre kaydını okur.
+    // Puan gönderimi ortak sayaçta yazma yapmaz ve hiçbir jüriyi kilitlemez.
     async function ortakSurePuanGonderinceBitir(kategori,mac,okul,ogrenci,gondermeAni){
         const ad=(ogrenci||'').split(' (')[0];
         const id=ortakSureKimligi(okul,ad);
@@ -1794,13 +1860,15 @@ Devam edilsin mi?`)){
 
     async function puanlariGonder() {
         if (puanGonderiliyor) return;
+        // Gönderim hakkı, ağ gecikmesinden sonra değil kullanıcının butona bastığı anda ölçülür.
+        const puanGondermeAni=ortakSureSimdi();
         if(!aktifOrtakSureVerisi){
             await juriSureOlayiYaz(juriSureDenetimTemeli({islem:'puan_gonderme',durum:'engellendi_sayac_yok',
                 hata:'Ortak sayaç doğrulanamadı; puan kaydedilmedi.',sifirlamaTalepEdildi:false,sifirlamaKullanildi:false})).catch(e=>console.warn('Puan engeli günlüğü yazılamadı:',e));
             await juriSureOturumLogunuGuncelle({durum:'puan_gonderme_engellendi_sayac_yok',puanGonderildi:false});
             return alert('Ortak süre doğrulanamadığı için puan kaydedilmedi. Bağlantıyı kontrol edin; gerekirse ortak süreyi gerekçeli olarak sıfırlayın.');
         }
-        if(!ortakPuanPenceresiAcik(aktifOrtakSureVerisi)){
+        if(!ortakPuanPenceresiAcik(aktifOrtakSureVerisi,puanGondermeAni)){
             await juriSureOlayiYaz(juriSureDenetimTemeli({islem:'puan_gonderme',durum:'engellendi_sure_asimi',
                 hata:'Ortak sayaç bitişinden sonraki 10 saniyelik puanlama penceresi dolmuş.',sifirlamaSecenegiSunuldu:true,
                 sifirlamaTalepEdildi:false,sifirlamaKullanildi:false,izinVerilenEkSureSaniye:ORTAK_PUAN_EK_SURE})).catch(e=>console.warn('Süre aşımı günlüğü yazılamadı:',e));
@@ -1822,7 +1890,6 @@ Devam edilsin mi?`)){
         secimler.macId = mac.id;
         secimleriKaydet();
         const kayitId = puanKayitKimligi(secimler, mac.id);
-        const puanGondermeAni=ortakSureSimdi();
         const btn = document.getElementById('btnPuanGonder');
         puanGonderiliyor = true;
         if (btn) { btn.disabled = true; btn.innerText = 'Gönderiliyor...'; }
@@ -1853,35 +1920,26 @@ Devam edilsin mi?`)){
             const m = await macDurumuGetir(secimler.kategori, mac.id);
             if (['kapali','iptal'].includes(m?.durum)) return alert('Bu maç kapatılmış veya iptal edilmiştir. Puan gönderilmedi.');
 
-            const kategoriRef = db.ref('puanlar/' + secimler.kategori);
-            const tumKayitlar = await kategoriRef.once('value');
-            const eskiAyniKayitlar = [];
-            tumKayitlar.forEach(c => {
-                const v = c.val();
-                if (!v || !v.secim || !v.puanlar) return;
-                if (puanKayitKimligi(v.secim, kayitMacId(v)) === kayitId) eskiAyniKayitlar.push({ key:c.key, value:v });
-            });
-
-            if (eskiAyniKayitlar.length) {
-                const ogrAd = (secimler.ogr || '').split(' (')[0];
-                const onay = confirm(`${oturum.juri} tarafından ${ogrAd} için daha önce puan gönderilmiş.\n\nYeni puan önceki kaydın yerine geçecek; çift kayıt oluşturulmayacak. Devam edilsin mi?`);
-                if (!onay) return;
+            // Her jüri, kendi deterministik puan kayıt anahtarına yazar. Bütün kategori
+            // kayıtlarını okumak veya kategori düğümüne toplu update göndermek gerekmez.
+            const kayitRef=db.ref(`puanlar/${secimler.kategori}/${kayitId}`);
+            const oncekiSnap=await kayitRef.once('value');
+            const onceki=oncekiSnap.val()||null;
+            if(onceki){
+                const ogrAd=(secimler.ogr||'').split(' (')[0];
+                const onay=confirm(`${oturum.juri} tarafından ${ogrAd} için daha önce puan gönderilmiş.\n\nYalnızca bu jüriye ait önceki kayıt güncellenecek. Devam edilsin mi?`);
+                if(!onay)return;
             }
-
-            const onceki = eskiAyniKayitlar.length ? eskiAyniKayitlar[eskiAyniKayitlar.length - 1].value : null;
             const kayit = {
                 ...kayitTemel,
                 createdAt: onceki?.createdAt || firebase.database.ServerValue.TIMESTAMP,
                 updatedAt: firebase.database.ServerValue.TIMESTAMP,
                 queuedOffline: false
             };
-            const updates = {};
-            updates[kayitId] = kayit;
-            eskiAyniKayitlar.forEach(x => { if (x.key !== kayitId) updates[x.key] = null; });
-            // Ağda kayıt öncesi son ortak süre denetimi: cihazda kalmış eski sayaçla geç puan yazılamaz.
+            // Ağda kayıt öncesi son ortak süre denetimi: gönderim tıklaması geç kalmışsa yazma.
             const sonTimerSnap=await db.ref(`maclar/${secimler.kategori}/${mac.id}/konusmaSayaclari/${ortakSureKimligi(secimler.okul,(secimler.ogr||'').split(' (')[0])}`).once('value');
             const sonTimer=sonTimerSnap.val();
-            if(!ortakPuanPenceresiAcik(sonTimer)){
+            if(!ortakPuanPenceresiAcik(sonTimer,puanGondermeAni)){
                 aktifOrtakSureVerisi=sonTimer||aktifOrtakSureVerisi;ortakSureGoster();
                 await juriSureOlayiYaz(juriSureDenetimTemeli({islem:'puan_gonderme',durum:'engellendi_son_kontrol',
                     hata:'Firebase üzerindeki son süre kontrolünde ortak sayaç bitişinden sonraki 10 saniyelik sınır aşılmış.',
@@ -1893,15 +1951,17 @@ Devam edilsin mi?`)){
                 return;
             }
             aktifOrtakSureVerisi=sonTimer;
-            // Puan yalnızca bu jüri için kaydedilir; diğer jürilerin ortak konuşma sayacı sürer.
-            await kategoriRef.update(updates);
+            // Doğrudan yalnızca bu jüriye ait kaydı yaz. Başka jürilerin kayıtları ve sayaç
+            // bu işlem tarafından hiçbir zaman güncellenmez.
+            await kayitRef.set(kayit);
+            eskiJuriPuanMukerrerleriniTemizle(secimler.kategori,kayitId,kayitId);
             await juriSureOturumLogunuGuncelle({durum:'puanlar_gonderildi',puanGonderildi:true,
-                puanGonderildiAt:firebase.database.ServerValue.TIMESTAMP,puanGondermeAniClient:ortakSureSimdi(),
+                puanGonderildiAt:firebase.database.ServerValue.TIMESTAMP,puanGondermeAniClient:puanGondermeAni,
                 kaydedilenKayitId:kayitId});
-            // ÖNEMLİ: Puan göndermek yalnızca bu jürinin puan kaydını yazar.
-            // Ortak konuşma sayacına dokunulmaz; diğer jüri cihazları kalan süreyi kullanmaya devam eder.
-            alert(eskiAyniKayitlar.length ? 'Puan güncellendi. Önceki mükerrer kayıtlar tek kayıtta birleştirildi.' : 'Puanlar başarıyla buluta gönderildi!');
-            await turnuvaAgacinaPuanYansit(secimler.kategori, mac.hukOkul, mac.muhOkul);
+            alert(onceki ? 'Bu jüriye ait puanlar güncellendi.' : 'Puanlar başarıyla buluta gönderildi!');
+            // Turnuva ağacını yansıtma ikincil işlemdir; başarısızlığı kaydedilmiş puanı geri almış gibi göstermez.
+            try{await turnuvaAgacinaPuanYansit(secimler.kategori, mac.hukOkul, mac.muhOkul);}
+            catch(agacErr){console.warn('Puan kaydedildi ancak turnuva ağacı güncellenemedi:',agacErr);}
             secimler.ogr = '';
             secimleriKaydet();
             renderPuanlamaSecim();
