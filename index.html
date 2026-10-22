@@ -286,7 +286,7 @@
 </div>
 
 <script>
-    const APP_VERSION = '3.32 · Oynanmış Maç Sonucu Onarımı';
+    const APP_VERSION = '3.33 · Eski Maç Durumu Eşitleme ve Oynanmış Sonuç Onarımı';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -317,6 +317,19 @@
 
     function puanMetniNormalize(v) {
         return String(v ?? '').normalize('NFC').trim();
+    }
+
+    // Eski kayıtlarda durum alanı farklı büyük/küçük harf veya Türkçe karakterle
+    // yazılmış olabilir (ör. "Kapalı" / "kapali"). Panel ve işlem denetimleri
+    // aynı kanonik değeri kullanır; tanınmayan değerler asla açık varsayılmaz.
+    function macDurumuKanonik(v) {
+        const n=puanMetniNormalize(v).toLocaleLowerCase('tr-TR')
+            .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i')
+            .replace(/[^a-z0-9]/g,'');
+        if(['acik','open','aktif'].includes(n)) return 'acik';
+        if(['kapali','closed','tamamlandi','sonuclandi','kesinlesti','bitti','finalized'].includes(n)) return 'kapali';
+        if(['iptal','iptaledildi','cancelled','canceled'].includes(n)) return 'iptal';
+        return 'bilinmiyor';
     }
 
     function htmlEscape(v) {
@@ -2657,6 +2670,7 @@ Devam edilsin mi?`)){
         }
         if(!m?.hukOkul || !m?.muhOkul)
             throw new Error('Maç için iki okul bulunamadı. Kayıt güvenli biçimde onarılamadığı için sonuç kapatılmadı.');
+        m={...m,durum:macDurumuKanonik(m.durum)};
         return m;
     }
     function renderYoneticiCanliPanel() {
@@ -2687,7 +2701,7 @@ Devam edilsin mi?`)){
         let skorlar=[], maclar={}, okullar={};
         const render=()=>{yoneticiSonPanelVerileri=[skorlar,maclar,okullar];canliPaneliCiz(skorlar,maclar,okullar);};
         const pRef=db.ref('puanlar/'+secimler.kategori); pRef.on('value',s=>{skorlar=snapshotKayitlariniTekillestir(s);render();}); aktifCanliPanelRefs.push(pRef);
-        const mRef=db.ref('maclar/'+secimler.kategori); mRef.on('value',s=>{maclar={};s.forEach(c=>maclar[c.key]=c.val());render();}); aktifCanliPanelRefs.push(mRef);
+        const mRef=db.ref('maclar/'+secimler.kategori); mRef.on('value',s=>{maclar={};s.forEach(c=>{const v=c.val()||{};maclar[c.key]={...v,durum:macDurumuKanonik(v.durum)};});render();}); aktifCanliPanelRefs.push(mRef);
         const oRef=db.ref('okullar/'+secimler.kategori); oRef.on('value',s=>{okullar={};s.forEach(c=>{okullar[c.key]=[];c.forEach(x=>okullar[c.key].push(String(x.val())));});render();}); aktifCanliPanelRefs.push(oRef);
         // Üst tur eşleşmeleri Firebase galipleri değiştiğinde canlı yenilenir.
         // Böylece yönetici panelini kapatıp açmaya gerek kalmaz.
@@ -3297,7 +3311,7 @@ Devam edilsin mi?`)){
         const bulunan=rows.filter(r=>(iptalGoster||r.m.durum!=='iptal')&&(!search||skorEslesmeAnahtari((r.m.fiksturNo||'')+' '+(r.m.etiket||macEtiketi(r.m.hukOkul,r.m.muhOkul))).includes(search)));
         let html='<table class="tutanak-table"><tr><th>Maç</th><th>Durum</th><th>3/3 Tam</th><th>Kayıtlı Puan (H / M)</th><th>Süre (H / M)</th><th>Sonuç</th><th>Yönetici İşlemleri</th></tr>';
         bulunan.forEach(r=>{
-            const kap=r.m.durum==='kapali',iptal=r.m.durum==='iptal',sure=r.m.sureEsitlik||(()=>{
+            const kap=macDurumuKanonik(r.m.durum)==='kapali',iptal=macDurumuKanonik(r.m.durum)==='iptal',belirsiz=macDurumuKanonik(r.m.durum)==='bilinmiyor',sure=r.m.sureEsitlik||(()=>{
                 const o=otomatikSureleriDerle(r.m);
                 return o.sayi?{hukSaniye:o.toplam.huk,muhSaniye:o.toplam.muh,kaynak:'otomatik'}:null;
             })();
@@ -3306,8 +3320,8 @@ Devam edilsin mi?`)){
                 skorEslesmeAnahtari(r.m.sonuc.kazanan)===skorEslesmeAnahtari(r.resmiSonuc.kazanan);
             const state=resmiKesin
                 ?(merkezUyumlu&&r.m.sonuc?.senkronDurum==='tamam'?'Resmî sonuç ve merkezî kayıt eşitlendi':'Resmî sonuç mevcut · merkezî kayıt kontrol edilmeli')
-                :r.m.sonuc?.senkronDurum==='tamam'?'Eşitlendi':(kap&&r.m.sonuc?.senkronDurum==='fikstur_eslesme_gerekli'?'Fikstür eşleştirmesi gerekli':kap?'Kayıt kapalı · sonuç denetlenmeli':iptal?'İptal':'Açık');
-            const tip=resmiKesin?'RESMÎ SONUÇ':kap?'KAPALI':iptal?'İPTAL':'AÇIK';
+                :r.m.sonuc?.senkronDurum==='tamam'?'Eşitlendi':(kap&&r.m.sonuc?.senkronDurum==='fikstur_eslesme_gerekli'?'Fikstür eşleştirmesi gerekli':kap?'Kayıt kapalı · sonuç denetlenmeli':iptal?'İptal':belirsiz?'Durum alanı tanınmıyor · güvenli onarım gerekli':'Açık');
+            const tip=resmiKesin?'RESMÎ SONUÇ':kap?'KAPALI':iptal?'İPTAL':belirsiz?'DURUM KONTROLÜ':'AÇIK';
             const kayitliSonuc=r.m.sonuc||{};
             const kesinPuan=kap&&Number.isFinite(kayitliSonuc.puanHuk)&&Number.isFinite(kayitliSonuc.puanMuh);
             const puan=kesinPuan?`${kayitliSonuc.puanHuk} / ${kayitliSonuc.puanMuh}`:(kap&&['hukmen','yonetici_karari','cift_eleme'].includes(kayitliSonuc.yontem)?'— / —':`${r.hamPuan.huk} / ${r.hamPuan.muh}`);
@@ -3326,7 +3340,7 @@ Devam edilsin mi?`)){
                     if(!merkezUyumlu||r.m.sonuc?.senkronDurum!=='tamam')
                         actions+=but('🔧 Resmî Sonuç Kaydını Onar / Eşitle',`yoneticiResmiSonucKaydiniOnar(${f})`,'#0f766e');
                     actions+='<div class="sure-hint">Bu maçın resmî sonucu fikstürde zaten kayıtlı. Yeniden kesinleştirme veya hükmen işlem uygulanmaz.</div>';
-                } else if(!kap){
+                } else if(!kap && !belirsiz){
                     actions+=but('✓ Sonucu Kesinleştir',`macDurumuDegistir(${f},'kapali')`,'#0f766e');
                     let istisnalar='';
                     istisnalar+=but('✏ Resmî Puanı Manuel Onayla',`yoneticiManuelSonucEkraniAc(${f})`,'#0f766e');
@@ -3342,7 +3356,10 @@ Devam edilsin mi?`)){
                     let istisnalar='';
                     if(!r.m.sonuc?.kazanan){
                         actions+=but('🧰 Oynanmış Maçın Sonucunu Onar',`yoneticiKapaliMacSonucunuOnarEkraniAc(${f})`,'#a16207');
-                        actions+='<div class="sure-hint">Maç kapalı, ancak merkezî sonuçta galip yok. Maç oynandıysa tutanağa göre sonucu onarın; yeniden açma veya hükmen kapatma yapmayın.</div>';
+                        actions+=`<div class="sure-hint">${belirsiz?'Maç durumu veritabanında tanınmayan bir değer. Sonucu gerçek tutanağa göre onarın; hükmen karar verilmez.':'Maç kapalı, ancak merkezî sonuçta galip yok. Gerçek tutanağa göre sonucu onarın; hükmen kapatma yapmayın.'}</div>`;
+                    }else if(belirsiz){
+                        actions+='<div class="sure-hint">Bu maçın durum alanı tanınmıyor ancak bir galip kaydı var. Önce resmî sonuç ve fikstür eşleşmesini denetleyin; yeni galip oluşturulmadı.</div>';
+                        actions+=but('🔧 Sonucu / Durumu Denetle',`yoneticiKapaliMacSonucunuOnarEkraniAc(${f})`,'#a16207');
                     }else{
                         istisnalar+=but('↩ Yeniden Aç (Sonucu Geri Al)',`macDurumuDegistir(${f},'acik')`,'#0f766e');
                         istisnalar+=but('🔗 Fikstürle Manuel Eşleştir',`yoneticiFiksturSonucEslestirEkraniAc(${f})`,'#0f766e');
@@ -3364,7 +3381,7 @@ Devam edilsin mi?`)){
         aktifSonucIslemleri.add(lock);
         try{
             const m=await yoneticiMaciniHazirla(kategori,macId);
-            if(m.durum!=='acik')throw new Error('Yalnız açık maçlar hükmen kapatılabilir.');
+            if(macDurumuKanonik(m.durum)!=='acik')throw new Error('Bu maçın durumu açık değil. Maç oynandıysa hükmen kapatmayın; “Oynanmış Maçın Sonucunu Onar” işlemini kullanın.');
             if([m.hukOkul,m.muhOkul].some(x=>!x||['boş','bay'].includes(fiksturIstisnaNorm(x))))
                 throw new Error('Hükmen kapatma için iki okulun da belirlenmiş olması gerekir.');
             const absent=prompt(`GELMEYEN okul hangisi?\n1 — ${m.hukOkul} (Hükümet)\n2 — ${m.muhOkul} (Muhalefet)\n\n1 veya 2 yazın:`);
@@ -3382,7 +3399,7 @@ Devam edilsin mi?`)){
             if(!confirm(`HÜKMEN SONUÇ ONAYI\n\nGelmeyen: ${maglup}\nGalip: ${kazanan}\nGerekçe: ${gerekce}\n\nJüri puanları şartı ARANMAYACAK. Fikstürde galip üst tura aktarılacak. Onaylıyor musunuz?`))return;
             const sonuc={kazanan,maglup,yontem:'hukmen',gerekce,puanHuk:null,puanMuh:null,sureHuk:m.sureEsitlik?.hukSaniye??null,sureMuh:m.sureEsitlik?.muhSaniye??null,macNo:fixture.no,kategori,macId,createdAt:Date.now(),senkronDurum:'bekliyor'};
             const r=await db.ref(`maclar/${kategori}/${macId}`).transaction(cur=>{
-                if(!cur||cur.durum!=='acik'||cur.updatedAt!==m.updatedAt)return;
+                if(!cur||macDurumuKanonik(cur.durum)!=='acik'||cur.updatedAt!==m.updatedAt)return;
                 cur.durum='kapali';cur.closedAt=Date.now();cur.updatedAt=Date.now();cur.version=(cur.version||0)+1;cur.sonuc=sonuc;
                 return cur;
             },undefined,false);
@@ -3402,7 +3419,7 @@ Devam edilsin mi?`)){
       aktifSonucIslemleri.add(lock);
       try{
         const m=await yoneticiMaciniHazirla(kategori,macId);
-        if(m.durum!=='acik')throw new Error('Yalnız açık maçlar çift eleme kararıyla kapatılabilir.');
+        if(macDurumuKanonik(m.durum)!=='acik')throw new Error('Bu maç açık durumda değil; mevcut sonucu değiştirerek çift eleme kararı uygulanamaz.');
         if([m.hukOkul,m.muhOkul].some(x=>!x||['boş','bay'].includes(fiksturIstisnaNorm(x))))
           throw new Error('İki okul da belli olmalı. Rakip bekleyen maç çift eleme ile kapatılamaz.');
         const fixture=await fiksturEslesmesiniBul(kategori,m.hukOkul,m.muhOkul);
@@ -3420,7 +3437,7 @@ Devam edilsin mi?`)){
         await db.ref(`arsiv/yoneticiKararlari/${kategori}/${Date.now()}_${macId}`).set({
           kategori,macId,oncekiMac:m,sonuc,createdAt:firebase.database.ServerValue.TIMESTAMP});
         const r=await db.ref(`maclar/${kategori}/${macId}`).transaction(cur=>{
-          if(!cur||cur.durum!=='acik'||cur.updatedAt!==m.updatedAt)return;
+          if(!cur||macDurumuKanonik(cur.durum)!=='acik'||cur.updatedAt!==m.updatedAt)return;
           cur.durum='kapali';cur.closedAt=Date.now();cur.updatedAt=Date.now();cur.version=(cur.version||0)+1;cur.sonuc=sonuc;
           return cur;
         },undefined,false);
@@ -3448,7 +3465,7 @@ Devam edilsin mi?`)){
             } else if(m.durum!=='iptal')throw new Error('Bu maç iptal edilmemiş.');
             if(!confirm(iptalEt?'Maçı iptal edip jüri seçiminden kaldırmak istiyor musunuz? Resmî fikstür ve veriler silinmez.':'Maç iptalini kaldırıp yeniden puanlamaya açmak istiyor musunuz?'))return;
             const r=await db.ref(`maclar/${kategori}/${macId}`).transaction(cur=>{
-                if(!cur||cur.updatedAt!==m.updatedAt||cur.durum!==(iptalEt?'acik':'iptal'))return;
+                if(!cur||cur.updatedAt!==m.updatedAt||macDurumuKanonik(cur.durum)!==(iptalEt?'acik':'iptal'))return;
                 cur.durum=iptalEt?'iptal':'acik';cur.iptal=iptalEt?{tarih:Date.now(),aciklama:'Yönetici tarafından iptal edildi'}:null;cur.updatedAt=Date.now();
                 return cur;
             },undefined,false);
@@ -3531,7 +3548,7 @@ Devam edilsin mi?`)){
         aktifSonucIslemleri.add(lock);
         try{
             const m=await yoneticiMaciniHazirla(kategori,macId);
-            if(m.durum!=='acik')throw new Error('Yalnız açık maçlar özel kararla kapatılabilir.');
+            if(macDurumuKanonik(m.durum)!=='acik')throw new Error('Bu maç açık durumda değil. Oynanmış maçın sonucunu tutanakla onarın.');
             const secim=prompt(`İSTİSNAİ YÖNETİCİ KARARI\n\nKazanan okulu seçin:\n1 — ${m.hukOkul}\n2 — ${m.muhOkul}\n\n1 veya 2 girin:`);
             if(secim===null)return;
             if(!['1','2'].includes(secim.trim()))throw new Error('Kazanan 1 veya 2 ile seçilmeli.');
@@ -3555,7 +3572,7 @@ Devam edilsin mi?`)){
             const auditRef=db.ref(`arsiv/yoneticiKararlari/${kategori}/${Date.now()}_${macId}`);
             await auditRef.set({kategori,macId,mac:{...m},sonuc,createdAt:firebase.database.ServerValue.TIMESTAMP});
             const r=await db.ref(`maclar/${kategori}/${macId}`).transaction(cur=>{
-                if(!cur||cur.durum!=='acik'||cur.updatedAt!==m.updatedAt)return;
+                if(!cur||macDurumuKanonik(cur.durum)!=='acik'||cur.updatedAt!==m.updatedAt)return;
                 cur.durum='kapali';cur.closedAt=Date.now();cur.updatedAt=Date.now();cur.version=(cur.version||0)+1;cur.sonuc=sonuc;
                 return cur;
             },undefined,false);
@@ -3576,7 +3593,7 @@ Devam edilsin mi?`)){
         try{
             const ref=db.ref(`maclar/${kategori}/${macId}`),ss=await ref.once('value'),m=ss.val();
             if(!m)throw new Error('Silinecek maç kaydı bulunamadı.');
-            if(m.durum!=='acik'||m.sonuc?.kazanan)throw new Error('Sonuçlandırılmış veya iptal edilmiş maç silinemez. Önce durumu düzeltin.');
+            if(macDurumuKanonik(m.durum)!=='acik'||m.sonuc?.kazanan)throw new Error('Sonuçlandırılmış veya iptal edilmiş maç silinemez. Önce durumu düzeltin.');
             const p=await db.ref('puanlar/'+kategori).once('value');
             const sayi=Object.keys(yoneticiMacaAitHamPuanlar(p,macId)).length;
             const text=`${m.hukOkul} — ${m.muhOkul}\n\nMaç operasyon kaydı silinecek. ${sayi} puan kaydı${sayi?' ÖNCE ARŞİVLENEREK AKTİF PUANLARDAN KALDIRILACAK':''}.\nResmî fikstür, öğrenci listeleri ve diğer maçlar korunacak; fikstürdeki maç yeniden listelenebilir.\n\nOnaylamak için MAC SIL yazın:`;
@@ -3586,7 +3603,7 @@ Devam edilsin mi?`)){
             let scoreResult={sayi:0};
             if(sayi)scoreResult=await yoneticiMacPuanlariniArsivleVeTemizle(kategori,macId,'mac_kaydi_silme_oncesi',m);
             const r=await ref.transaction(cur=>{
-                if(!cur||cur.updatedAt!==m.updatedAt||cur.durum!=='acik'||cur.sonuc?.kazanan)return;
+                if(!cur||cur.updatedAt!==m.updatedAt||macDurumuKanonik(cur.durum)!=='acik'||cur.sonuc?.kazanan)return;
                 return null;
             },undefined,false);
             if(!r.committed)throw new Error('Maç kaydı başka cihazda değişti; silinemedi. Puan arşivini ve durumu kontrol edin.');
@@ -3814,7 +3831,7 @@ Resmî sonuç merkezî maça yazılacak ve iki ağaç yeniden eşitlenecek. Jür
                 islem:'resmi_fiksturdan_merkezi_sonuc_onarimi',createdAt:firebase.database.ServerValue.TIMESTAMP});
             const ref=db.ref(`maclar/${kategori}/${macId}`);
             const applied=await ref.transaction(cur=>{
-                if(!cur||cur.durum==='iptal'||cur.updatedAt!==m.updatedAt)return;
+                if(!cur||macDurumuKanonik(cur.durum)==='iptal'||cur.updatedAt!==m.updatedAt)return;
                 if(cur.sonuc?.kazanan&&skorEslesmeAnahtari(cur.sonuc.kazanan)!==skorEslesmeAnahtari(kazanan))return;
                 if(skorEslesmeAnahtari(cur.hukOkul)!==skorEslesmeAnahtari(m.hukOkul)||
                    skorEslesmeAnahtari(cur.muhOkul)!==skorEslesmeAnahtari(m.muhOkul))return;
@@ -3839,7 +3856,8 @@ Resmî sonuç merkezî maça yazılacak ve iki ağaç yeniden eşitlenecek. Jür
         yoneticiManuelPencereKapat();
         try{
             const m=await yoneticiMaciniHazirla(kategori,macId);
-            if(m.durum!=='kapali')return alert('Bu onarım yalnızca daha önce kapatılmış maç kaydında kullanılabilir.');
+            const durumOnarim=macDurumuKanonik(m.durum);
+            if(!['kapali','bilinmiyor'].includes(durumOnarim))return alert('Bu ekran yalnızca kapalı veya eski sürümden kalan tanınmayan durumlu maçların sonucunu onarır. Açık maçı normal kesinleştirme ile kapatın; iptal edilmiş maçı onarmayın.');
             if(m.sonuc?.kazanan)return alert('Merkezî kayıtta galip zaten var. Sonucu yeniden girmek yerine fikstür senkronunu kontrol edin.');
             const fs=(await db.ref('fikstur/tekSalon_2026_2027').once('value')).val()||{};
             const official=Object.values(fs.finalizedMatches||{}).filter(v=>v&&v.macId===macId&&(!v.kategori||v.kategori===kategori));
@@ -3857,7 +3875,7 @@ Resmî sonuç merkezî maça yazılacak ve iki ağaç yeniden eşitlenecek. Jür
             host.innerHTML=`<div class="sure-modal-bg" role="dialog" aria-modal="true" aria-label="Oynanmış maç sonucunu onar">
               <div class="sure-modal-card" style="width:min(770px,98vw)">
                 <h2>🧰 Oynanmış Maçın Sonucunu Onar</h2>
-                <div class="puanlama-bilgi hata"><b>${htmlEscape(m.hukOkul)} — ${htmlEscape(m.muhOkul)}</b><div>Bu maçın merkezî kaydı kapalı fakat kayıtlı galip bulunamadı. Maçın gerçek sonucu ve tutanağı doğrulanmadan tahminî galip kaydedilmemelidir.</div><div>Jüri puan kayıtları korunacak; işlem denetim arşivine yazılacak.</div></div>
+                <div class="puanlama-bilgi hata"><b>${htmlEscape(m.hukOkul)} — ${htmlEscape(m.muhOkul)}</b><div>Bu maçın merkezî kaydında galip eksik. Durum kapalı veya eski sürümden kalan tanınmayan bir değer olabilir. Gerçek sonuç ve tutanak doğrulanmadan galip kaydedilmemelidir.</div><div>Jüri puan kayıtları korunacak; işlem denetim arşivine yazılacak.</div></div>
                 <div class="puanlama-bilgi">Jüri kayıtları: ${puanlar.filter(v=>kayitMacId(v)===macId).length} · Öğrenci/jüri denetimi: <b>${denetim.ready?'TAMAM':'EKSİK / UYUŞMUYOR'}</b>
                 ${!denetim.ready?'<div style="margin-top:6px">'+(sorunlar.length?sorunlar.map(x=>htmlEscape(x)).join('<div></div>'):'Jüri veya öğrenci kadrosu doğrulanamadı.')+'</div>':''}</div>
                 <label class="puanlama-etiket" for="kapaliOnarPuanHuk">${htmlEscape(m.hukOkul)} — toplam puan</label>
@@ -3897,7 +3915,8 @@ Resmî sonuç merkezî maça yazılacak ve iki ağaç yeniden eşitlenecek. Jür
         const btn=document.getElementById('kapaliOnarKaydetBtn');if(btn){btn.disabled=true;btn.textContent='Kaydediliyor…';}
         try{
             const m=await yoneticiMaciniHazirla(kategori,macId);
-            if(m.durum!=='kapali'||m.sonuc?.kazanan)throw new Error('Maç durumu değişmiş veya galip başka bir işlemde kaydedilmiş. Yenileyip kontrol edin.');
+            const onarimDurumu=macDurumuKanonik(m.durum);
+            if(!['kapali','bilinmiyor'].includes(onarimDurumu)||m.sonuc?.kazanan)throw new Error('Maç durumu değişmiş veya galip başka bir işlemde kaydedilmiş. Yenileyip kontrol edin.');
             const fs=(await db.ref('fikstur/tekSalon_2026_2027').once('value')).val()||{};
             const already=Object.values(fs.finalizedMatches||{}).some(v=>v&&v.macId===macId&&(!v.kategori||v.kategori===kategori));
             if(already)throw new Error('Bu maçın resmî fikstür sonucu oluşmuş. Manuel onarım iptal edildi; resmî sonucu eşitleme aracını kullanın.');
@@ -3919,7 +3938,7 @@ Resmî sonuç merkezî maça yazılacak ve iki ağaç yeniden eşitlenecek. Jür
                 islem:'kapali_oynanmis_mac_sonucunun_tutanakla_onarimi',createdAt:firebase.database.ServerValue.TIMESTAMP});
             const ref=db.ref(`maclar/${kategori}/${macId}`);
             const applied=await ref.transaction(cur=>{
-                if(!cur||cur.durum!=='kapali'||cur.updatedAt!==m.updatedAt||cur.sonuc?.kazanan)return;
+                if(!cur||!['kapali','bilinmiyor'].includes(macDurumuKanonik(cur.durum))||cur.updatedAt!==m.updatedAt||cur.sonuc?.kazanan)return;
                 if(skorEslesmeAnahtari(cur.hukOkul)!==skorEslesmeAnahtari(m.hukOkul)||skorEslesmeAnahtari(cur.muhOkul)!==skorEslesmeAnahtari(m.muhOkul))return;
                 cur.durum='kapali';cur.sonuc=sonuc;cur.fiksturNo=Number(fixture.no);cur.fiksturBaglantisi=baglanti;
                 cur.closedAt=cur.closedAt||Date.now();cur.updatedAt=Date.now();cur.version=(cur.version||0)+1;return cur;
@@ -3973,14 +3992,14 @@ Resmî sonuç merkezî maça yazılacak ve iki ağaç yeniden eşitlenecek. Jür
             const m=await yoneticiMaciniHazirla(kategori,macId);
             if(!m?.hukOkul||!m?.muhOkul)throw new Error('Maç için iki okul bulunamadı.');
             if(yeniDurum==='kapali') {
-                if(m.durum!=='acik')throw new Error('Sadece açık maç kesinleştirilebilir.');
+                if(macDurumuKanonik(m.durum)!=='acik')throw new Error('Bu maçın durumu açık değil. Eski kayıt durumları eşitlendi; oynanmış maçsa “Oynanmış Maçın Sonucunu Onar” ile tutanağa göre kesinleştirin.');
                 await otomatikSureleriKaydet(kategori,macId);
                 const kontrol=(await ref.once('value')).val()||m;
                 const fixture=await fiksturEslesmesiniBul(kategori,kontrol.hukOkul,kontrol.muhOkul);
                 const sonuc=await macSonucunuHesapla(kategori,macId,kontrol,fixture);
                 if(!confirm(`${m.hukOkul}: ${sonuc.puanHuk} puan\n${m.muhOkul}: ${sonuc.puanMuh} puan\n\nGALİP: ${sonuc.kazanan}\nYÖNTEM: ${sonuc.yontem==='puan'?'Jüri puanı':sonuc.yontem==='sure'?'Daha kısa toplam konuşma süresi':'Son savunma (manuel)'}\n\nMaçı kapatıp iki turnuva ağacına kaydetmek istiyor musunuz?`))return;
                 const trans=await ref.transaction(cur=>{
-                    if(!cur || cur.durum!=='acik' || cur.updatedAt!==kontrol.updatedAt || (cur.sureEsitlik?.updatedAt||0)!==(kontrol.sureEsitlik?.updatedAt||0))return;
+                    if(!cur || macDurumuKanonik(cur.durum)!=='acik' || cur.updatedAt!==kontrol.updatedAt || (cur.sureEsitlik?.updatedAt||0)!==(kontrol.sureEsitlik?.updatedAt||0))return;
                     cur.durum='kapali';cur.closedAt=Date.now();cur.updatedAt=Date.now();cur.version=(cur.version||0)+1;
                     cur.sonuc=sonuc;return cur;
                 },undefined,false);
@@ -4001,7 +4020,7 @@ Resmî sonuç merkezî maça yazılacak ve iki ağaç yeniden eşitlenecek. Jür
                     if(hasFixture)throw new Error('Maçın resmî bir kayıt bağlantısı bulundu. Önce fikstürle eşleştirme/denetim yapılmalı.');
                     if(!confirm('Bu sonuç yalnızca merkezî maç kaydında bulunuyor; resmî fikstüre aktarılmamış. Maçı yeniden açıp merkezî sonucu kaldırmak istiyor musunuz? Jüri puanları silinmeyecek.'))return;
                     const tr=await ref.transaction(cur=>{
-                        if(!cur||cur.durum!=='kapali'||cur.updatedAt!==m.updatedAt||cur.sonuc?.macId!==macId||cur.sonuc?.macNo!=null)return;
+                        if(!cur||macDurumuKanonik(cur.durum)!=='kapali'||cur.updatedAt!==m.updatedAt||cur.sonuc?.macId!==macId||cur.sonuc?.macNo!=null)return;
                         cur.durum='acik';cur.sonuc=null;cur.closedAt=null;cur.updatedAt=Date.now();cur.version=(cur.version||0)+1;
                         return cur;
                     },undefined,false);
@@ -4287,7 +4306,7 @@ Resmî sonuç merkezî maça yazılacak ve iki ağaç yeniden eşitlenecek. Jür
         aktifSonucIslemleri.add(lock);
         try{
             const m=await yoneticiMaciniHazirla(kategori,macId);
-            if(m.durum!=='acik')throw new Error('Maç başka bir cihazda kapatılmış veya iptal edilmiş.');
+            if(macDurumuKanonik(m.durum)!=='acik')throw new Error('Maç başka bir cihazda kapatılmış veya iptal edilmiş.');
             const kazanan=taraf==='huk'?m.hukOkul:m.muhOkul;
             const maglup=taraf==='huk'?m.muhOkul:m.hukOkul;
             // Eşleşme adlarla bulunmak zorunda değil. Yöneticinin bu ekranda
@@ -4316,7 +4335,7 @@ Resmî sonuç merkezî maça yazılacak ve iki ağaç yeniden eşitlenecek. Jür
                 islemDurumu:'hazirlandi',createdAt:firebase.database.ServerValue.TIMESTAMP});
             const ref=db.ref(`maclar/${kategori}/${macId}`);
             const applied=await ref.transaction(cur=>{
-                if(!cur || cur.durum!=='acik'||cur.updatedAt!==m.updatedAt||
+                if(!cur || macDurumuKanonik(cur.durum)!=='acik'||cur.updatedAt!==m.updatedAt||
                     skorEslesmeAnahtari(cur.hukOkul)!==skorEslesmeAnahtari(m.hukOkul)||
                     skorEslesmeAnahtari(cur.muhOkul)!==skorEslesmeAnahtari(m.muhOkul))return;
                 cur.durum='kapali';cur.closedAt=Date.now();cur.updatedAt=Date.now();
@@ -4344,7 +4363,7 @@ Resmî sonuç merkezî maça yazılacak ve iki ağaç yeniden eşitlenecek. Jür
         yoneticiManuelPencereKapat();
         try{
             const m=await yoneticiMaciniHazirla(kategori,macId);
-            if(m.durum!=='kapali'||!m.sonuc?.kazanan)return alert('Önce sonuç kaydedilmiş bir maç seçin.');
+            if(macDurumuKanonik(m.durum)!=='kapali'||!m.sonuc?.kazanan)return alert('Önce sonuç kaydedilmiş bir maç seçin.');
             const host=document.createElement('div');host.id='yoneticiManuelSonucHost';document.body.appendChild(host);
             host.innerHTML=`<div class="sure-modal-bg" role="dialog" aria-modal="true"><div class="sure-modal-card" style="width:min(760px,98vw)">
                 <h2>🔗 Kapanmış Maçı Resmî Fikstürle Eşleştir</h2>
@@ -4365,7 +4384,7 @@ Resmî sonuç merkezî maça yazılacak ve iki ağaç yeniden eşitlenecek. Jür
         const btn=document.getElementById('manuelBaglantiKaydetBtn');if(btn)btn.disabled=true;
         try{
             const m=await yoneticiMaciniHazirla(kategori,macId);
-            if(m.durum!=='kapali'||!m.sonuc?.kazanan)throw new Error('Maç kapalı ve galibi kayıtlı olmalıdır.');
+            if(macDurumuKanonik(m.durum)!=='kapali'||!m.sonuc?.kazanan)throw new Error('Maç kapalı ve galibi kayıtlı olmalıdır.');
             const {fixture,baglanti}=yoneticiFiksturFormDegeriniOku(kategori,m);
             if(!fixture)throw new Error('Resmî fikstür maç numarasını seçin.');
             const gerekce=puanMetniNormalize(document.getElementById('manuelBaglantiGerekce')?.value||'');
@@ -4380,7 +4399,7 @@ Resmî sonuç merkezî maça yazılacak ve iki ağaç yeniden eşitlenecek. Jür
             await db.ref(auditPath).set({kategori,macId,oncekiSonuc:m.sonuc,baglanti,gerekce,
                 islem:'kapali_mac_eslestirme',createdAt:firebase.database.ServerValue.TIMESTAMP});
             const applied=await db.ref(`maclar/${kategori}/${macId}`).transaction(cur=>{
-                if(!cur||cur.durum!=='kapali'||cur.updatedAt!==m.updatedAt||
+                if(!cur||macDurumuKanonik(cur.durum)!=='kapali'||cur.updatedAt!==m.updatedAt||
                    cur.sonuc?.kazanan!==m.sonuc.kazanan||
                    Number(cur.sonuc?.macNo||0)!==Number(m.sonuc.macNo||0))return;
                 cur.sonuc=sonuc;cur.fiksturBaglantisi=baglanti;cur.fiksturNo=Number(fixture.no);
