@@ -286,7 +286,7 @@
 </div>
 
 <script>
-    const APP_VERSION = '3.29 · Sonuçlarda Günün Maçına Otomatik Odak';
+    const APP_VERSION = '3.30 · Eksik Maç Okul Kaydı Onarımı';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -645,11 +645,71 @@
         if (!hukOkul || !muhOkul) return null;
         const id = macKimligiOlustur(kategori, hukOkul, muhOkul);
         const ref = db.ref(`maclar/${kategori}/${id}`);
-        await ref.transaction(cur => {
-            if (cur) return cur; // Mevcut maç ve kesinleşmiş sonuç asla üzerine yazılmaz.
+        const beklenenHuk = skorEslesmeAnahtari(hukOkul);
+        const beklenenMuh = skorEslesmeAnahtari(muhOkul);
+        const trans = await ref.transaction(cur => {
+            if (cur) {
+                // Eski/yarım kalmış operasyon kayıtlarında okul alanları boş olabilir.
+                // Yalnızca boş alanları, aynı kayıt anahtarının beklenen okullarıyla
+                // çelişmiyorsa tamamla. Puanlar, durum ve kesin sonuç korunur.
+                const mevcutHuk = skorEslesmeAnahtari(cur.hukOkul || '');
+                const mevcutMuh = skorEslesmeAnahtari(cur.muhOkul || '');
+                if ((!mevcutHuk || !mevcutMuh) &&
+                    (!mevcutHuk || mevcutHuk === beklenenHuk) &&
+                    (!mevcutMuh || mevcutMuh === beklenenMuh)) {
+                    if (!mevcutHuk) cur.hukOkul = hukOkul;
+                    if (!mevcutMuh) cur.muhOkul = muhOkul;
+                    if (!cur.etiket) cur.etiket = macEtiketi(hukOkul, muhOkul);
+                    if (!cur.id) cur.id = id;
+                    if (!cur.kategori) cur.kategori = kategori;
+                    cur.updatedAt = Date.now();
+                    cur.version = (cur.version || 0) + 1;
+                }
+                return cur;
+            }
             return { id, kategori, hukOkul, muhOkul, etiket: macEtiketi(hukOkul, muhOkul), durum: 'acik', createdAt: Date.now(), updatedAt: Date.now(), version: 1 };
-        });
+        }, undefined, false);
+        const saved = trans.snapshot?.val();
+        if (!saved?.hukOkul || !saved?.muhOkul) {
+            throw new Error('Maç kaydındaki okul bilgileri eksik veya kayıt anahtarıyla çelişiyor. Güvenli eşleşme sağlanamadığı için puan/sonuç işlemi durduruldu.');
+        }
         return id;
+    }
+
+    // Operasyon kaydı eksikse okulları önce aynı kimliğe bağlı resmî fikstürden,
+    // bu mümkün değilse aynı macId ile kaydedilmiş ve birbiriyle tutarlı jüri
+    // seçimlerinden çıkarır. Kimlik uyuşmazlığında tahmin yürütmez.
+    function puanKayitlarindanMacOkulCiftiBul(snapshot, kategori, macId) {
+        const pairs = new Map();
+        const tarafOkullari = { huk: new Map(), muh: new Map() };
+        const ekle = (huk, muh) => {
+            const h = puanMetniNormalize(huk), u = puanMetniNormalize(muh);
+            if (!h || !u || skorEslesmeAnahtari(h) === skorEslesmeAnahtari(u)) return;
+            if (String(macId).startsWith('m_') && macKimligiOlustur(kategori, h, u) !== macId) return;
+            pairs.set(`${skorEslesmeAnahtari(h)}|${skorEslesmeAnahtari(u)}`, { hukOkul: h, muhOkul: u });
+        };
+        if (snapshot) snapshot.forEach(child => {
+            const v = child.val();
+            if (!v?.secim || kayitMacId(v) !== macId) return;
+            const secim = v.secim;
+            if (secim.hukOkul && secim.muhOkul) ekle(secim.hukOkul, secim.muhOkul);
+            if (secim.taraf === 'HÜKÜMET' && secim.okul) {
+                const n = puanMetniNormalize(secim.okul);
+                tarafOkullari.huk.set(skorEslesmeAnahtari(n), n);
+            } else if (secim.taraf === 'MUHALEFET' && secim.okul) {
+                const n = puanMetniNormalize(secim.okul);
+                tarafOkullari.muh.set(skorEslesmeAnahtari(n), n);
+            }
+        });
+        if (pairs.size === 1) return [...pairs.values()][0];
+        if (pairs.size > 1) return null;
+        if (tarafOkullari.huk.size === 1 && tarafOkullari.muh.size === 1) {
+            const hukOkul = [...tarafOkullari.huk.values()][0];
+            const muhOkul = [...tarafOkullari.muh.values()][0];
+            if (String(macId).startsWith('m_') && macKimligiOlustur(kategori, hukOkul, muhOkul) !== macId) return null;
+            if (skorEslesmeAnahtari(hukOkul) !== skorEslesmeAnahtari(muhOkul)) return { hukOkul, muhOkul };
+        }
+        return null;
     }
 
     async function macDurumuGetir(kategori, macId) {
@@ -2148,8 +2208,10 @@ Devam edilsin mi?`)){
                 for(const f of macListesi){
                     if(f.cat!==(kat==='LİSE'?'lise':'ortaokul') || !puanlamaGecerliFiksturMaci(f))continue;
                     const id=macKimligiOlustur(kat,f.team1,f.team2);
+                    // temel mevcut kayıt alanlarını zaten taşır; okul adları ve
+                    // fikstür metadata'sı resmî eşleşmeden gelir, eksik DB alanları ezemez.
                     const temel=puanlamaFiksturMacKaydi(f,maclarMap[id]||{});
-                    maclarMap[id]={...temel,...(maclarMap[id]||{}),fiksturNo:temel.fiksturNo,fiksturTarih:temel.fiksturTarih};
+                    maclarMap[id]=temel;
                 }
             }catch(err){console.warn('Sabit fikstür maçları listeye eklenemedi (mevcut kayıtlar korunur):',err);}
             raporVerisiniIsle(kayitlar, maclarMap, resmiFikstur);
@@ -2538,14 +2600,55 @@ Devam edilsin mi?`)){
     }
     async function yoneticiMaciniHazirla(kategori,macId){
         const ref=db.ref(`maclar/${kategori}/${macId}`);
-        let s=await ref.once('value');
-        if(s.val())return s.val();
+        let snap=await ref.once('value');
+        let m=snap.val();
         const f=yoneticiFiksturMaclari.find(x=>x.id===macId && x.kategori===kategori);
-        if(!f)throw new Error('Bu maçın resmî fikstür bilgisi bulunamadı. Fikstür ekranından kontrol edin.');
-        await ensureMatchExists(kategori,f.hukOkul,f.muhOkul);
-        s=await ref.once('value');
-        if(!s.val())throw new Error('Maç kaydı oluşturulamadı.');
-        return s.val();
+
+        if(!m && f && f.hukOkul && f.muhOkul && macKimligiOlustur(kategori,f.hukOkul,f.muhOkul)===macId){
+            await ensureMatchExists(kategori,f.hukOkul,f.muhOkul);
+            snap=await ref.once('value');
+            m=snap.val();
+        }
+
+        if(!m || !m.hukOkul || !m.muhOkul){
+            let cift=null;
+            // En güvenilir kaynak: aynı macId'yi üreten resmî fikstür satırı.
+            if(f && f.hukOkul && f.muhOkul && macKimligiOlustur(kategori,f.hukOkul,f.muhOkul)===macId)
+                cift={hukOkul:f.hukOkul,muhOkul:f.muhOkul};
+            // Manuel/eski kayıtlar için yalnız aynı maçın jüri kayıtlarından
+            // tek ve kimlikle doğrulanabilir bir okul çifti kabul edilir.
+            if(!cift){
+                const pSnap=await db.ref(`puanlar/${kategori}`).once('value');
+                cift=puanKayitlarindanMacOkulCiftiBul(pSnap,kategori,macId);
+            }
+            if(!cift){
+                if(!m)throw new Error('Maç kaydı ve güvenli okul eşleşmesi bulunamadı. Sonuç kapatılmadı; fikstür/puan kayıtları korunuyor.');
+                throw new Error('Maç kaydında bir veya iki okul eksik. Aynı maçın resmî fikstüründen ya da jüri kayıtlarından güvenli eşleşme çıkarılamadı; sonuç kapatılmadı.');
+            }
+            const beklenenHuk=skorEslesmeAnahtari(cift.hukOkul), beklenenMuh=skorEslesmeAnahtari(cift.muhOkul);
+            const repaired=await ref.transaction(cur=>{
+                if(!cur){
+                    return {id:macId,kategori,hukOkul:cift.hukOkul,muhOkul:cift.muhOkul,
+                        etiket:macEtiketi(cift.hukOkul,cift.muhOkul),durum:'acik',createdAt:Date.now(),updatedAt:Date.now(),version:1};
+                }
+                const ch=skorEslesmeAnahtari(cur.hukOkul||''), cm=skorEslesmeAnahtari(cur.muhOkul||'');
+                // Mevcut ve dolu bir okul alanı kaynakla çelişirse üzerine yazma.
+                if((ch && ch!==beklenenHuk)||(cm && cm!==beklenenMuh))return;
+                if(!ch)cur.hukOkul=cift.hukOkul;
+                if(!cm)cur.muhOkul=cift.muhOkul;
+                if(!cur.etiket)cur.etiket=macEtiketi(cift.hukOkul,cift.muhOkul);
+                if(!cur.id)cur.id=macId;
+                if(!cur.kategori)cur.kategori=kategori;
+                cur.updatedAt=Date.now();
+                cur.version=(cur.version||0)+1;
+                return cur;
+            },undefined,false);
+            if(!repaired.committed)throw new Error('Okul bilgileri bulundu ancak mevcut kayıtla çelişiyor. Güvenlik için otomatik düzeltme yapılmadı; fikstür ve jüri kayıtları korunuyor.');
+            m=repaired.snapshot.val();
+        }
+        if(!m?.hukOkul || !m?.muhOkul)
+            throw new Error('Maç için iki okul bulunamadı. Kayıt güvenli biçimde onarılamadığı için sonuç kapatılmadı.');
+        return m;
     }
     function renderYoneticiCanliPanel() {
         if(!adminYetkiliMi())return alert('Yönetici yetkisi gerekiyor.');
@@ -2666,7 +2769,9 @@ Devam edilsin mi?`)){
             for(const f of fixture){
                 if(f.cat!==(kategori==='LİSE'?'lise':'ortaokul') || !puanlamaGecerliFiksturMaci(f))continue;
                 const mid=macKimligiOlustur(kategori,f.team1,f.team2);
-                matches.set(mid,{...puanlamaFiksturMacKaydi(f),...(fromDB[mid]||{}),id:mid});
+                // Resmî fikstürün takım adları, eski/eksik maç kaydındaki boş
+                // okul alanları tarafından ezilmesin.
+                matches.set(mid,{...puanlamaFiksturMacKaydi(f,fromDB[mid]||{}),id:mid});
             }
             for(const [mid,m] of Object.entries(fromDB)){
                 if(!m?.hukOkul||!m?.muhOkul||matches.has(mid))continue;
@@ -3129,7 +3234,19 @@ Devam edilsin mi?`)){
 
     function canliPaneliCiz(skorlar,maclar,okullar) {
         const inferred={...maclar};
-        for(const m of yoneticiFiksturMaclari){if(!inferred[m.id])inferred[m.id]={...m,_sanal:true};else inferred[m.id]={...m,...inferred[m.id],fiksturNo:inferred[m.id].fiksturNo||m.fiksturNo};}
+        for(const m of yoneticiFiksturMaclari){
+            if(!inferred[m.id])inferred[m.id]={...m,_sanal:true};
+            else {
+                const kayit=inferred[m.id];
+                // Firebase'de eski/eksik bir kayıt varsa, boş okul alanları resmî
+                // fikstürün doğru adlarını ezmesin. Dolu kayıt alanları korunur.
+                inferred[m.id]={...m,...kayit,
+                    hukOkul:kayit.hukOkul||m.hukOkul,
+                    muhOkul:kayit.muhOkul||m.muhOkul,
+                    etiket:kayit.etiket||m.etiket,
+                    fiksturNo:kayit.fiksturNo||m.fiksturNo};
+            }
+        }
         skorlar.forEach(v=>{const id=kayitMacId(v);if(!inferred[id])inferred[id]={id,etiket:kayitMacEtiketi(v),hukOkul:v.secim?.hukOkul||'',muhOkul:v.secim?.muhOkul||'',durum:'acik'};});
         const rows=[];
         Object.entries(inferred).forEach(([id,m])=>{
