@@ -3141,7 +3141,7 @@ Devam edilsin mi?`)){
         ]);
         const m=mSnap.val();
         if(!m||!m.hukOkul||!m.muhOkul)throw new Error('Maç kaydı veya okul adları bulunamadı.');
-        const fixture=await yoneticiFiksturEslesmesiniBul(kategori,m.hukOkul,m.muhOkul);
+        const fixture=await fiksturEslesmesiniBul(kategori,m.hukOkul,m.muhOkul);
         const f=fSnap.val()||{};
         const finalized=f.finalizedMatches?.[fixture.no];
         if(finalized?.macId && finalized.macId!==macId)throw new Error('Bu resmî maç numarası başka bir maç kaydına bağlı. İşlem durduruldu.');
