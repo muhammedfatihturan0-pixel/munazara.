@@ -986,7 +986,7 @@
         return gecmis[0].id;
     }
 
-    async function puanlamaVerileriniYukle() {
+    async function puanlamaVerileriniYukle(korunacakMacId = '') {
         const surum=puanlamaYuklemeSurumu,kat=secimler.kategori;
         const [oRes,mRes]=await Promise.allSettled([
             db.ref('okullar/'+kat).once('value'),
@@ -1037,9 +1037,14 @@
         if(surum!==puanlamaYuklemeSurumu || document.getElementById('aktifMac')!==select)return;
         const otomatikMacId=puanlamaSaatineGoreOtomatikMacBul(otomatikSimdi);
         const otomatikMacSecenegi=otomatikMacId ? [...select.options].find(x=>x.value===otomatikMacId && !x.disabled) : null;
+        const korunacakMacSecenegi=korunacakMacId ? [...select.options].find(x=>x.value===korunacakMacId && !x.disabled) : null;
         const oncekiMacSecenegi=oncekiMac ? [...select.options].find(x=>x.value===oncekiMac && !x.disabled) : null;
-        if(otomatikMacSecenegi){
-            // Her açılışta eski günün seçimini sürdürmek yerine saatine uygun maça geç.
+        if(korunacakMacSecenegi){
+            // Puan gönderiminden dönüşte aynı maçta kal; yalnızca öğrenci seçimi yeniden yapılır.
+            select.value=korunacakMacId;
+            await merkeziMacSecildi(true);
+        }else if(otomatikMacSecenegi){
+            // Yeni girişlerde mevcut davranış: cihaz/sunucu saatine uygun maçı otomatik seç.
             select.value=otomatikMacId;
             await merkeziMacSecildi(true);
         }else if(oncekiMacSecenegi){
@@ -1082,7 +1087,7 @@
         void puanlamaVerileriniYukle();
     }
 
-    function renderPuanlamaSecim() {
+    function renderPuanlamaSecim(korunacakMacId = '') {
         dinleyicileriTemizle();
         puanlamaYuklemeSurumu++;
         verilenPuanlar = {};
@@ -1137,7 +1142,7 @@
                 <button class="btn" style="background:#475569;" onclick="anaMenu()">← Ana Menü</button>
             </div>`;
         void juriPaneliniGuncelle();
-        void puanlamaVerileriniYukle();
+        void puanlamaVerileriniYukle(korunacakMacId);
     }
 
     function puanlamaKaynakAdi(m,taraf) {
@@ -2018,7 +2023,7 @@ Devam edilsin mi?`)){
                 alert('İnternet bağlantısı yok. Puan bu cihazda kuyruğa alındı; bağlantı gelince gönderilecek. Ortak sayaç değiştirilmeyecek.');
                 secimler.ogr = '';
                 secimleriKaydet();
-                return renderPuanlamaSecim();
+                return renderPuanlamaSecim(mac.id);
             }
 
             await ensureMatchExists(secimler.kategori, mac.hukOkul, mac.muhOkul);
@@ -2069,7 +2074,7 @@ Devam edilsin mi?`)){
             catch(agacErr){console.warn('Puan kaydedildi ancak turnuva ağacı güncellenemedi:',agacErr);}
             secimler.ogr = '';
             secimleriKaydet();
-            renderPuanlamaSecim();
+            renderPuanlamaSecim(mac.id);
         } catch (err) {
             console.error('Puan gönderme hatası:', err);
             const code = String(err?.code || '').toLowerCase();
@@ -2080,7 +2085,7 @@ Devam edilsin mi?`)){
                 alert('Bağlantı sorunu nedeniyle puan yerel kuyruğa alındı. İnternet geldiğinde otomatik gönderilecek; ortak sayaç kapatılmadı.');
                 secimler.ogr = '';
                 secimleriKaydet();
-                renderPuanlamaSecim();
+                renderPuanlamaSecim(mac.id);
             } else {
                 alert('Puan gönderilemedi: Firebase erişim yetkisi reddedildi.');
             }
