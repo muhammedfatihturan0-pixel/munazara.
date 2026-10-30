@@ -2901,9 +2901,18 @@ Devam edilsin mi?`)){
     }
     async function yoneticiMaciniHazirla(kategori,macId){
         const ref=db.ref(`maclar/${kategori}/${macId}`);
-        const f=yoneticiFiksturMaclari.find(x=>x.id===macId && x.kategori===kategori);
+        let f=yoneticiFiksturMaclari.find(x=>x.id===macId && x.kategori===kategori);
         let s=await ref.once('value');
         let mac=s.val();
+        if((!mac||!mac.hukOkul||!mac.muhOkul)&&!f){
+            // Liste henüz yüklenmemişse, yalnızca bu eksik kayıt için sabit fikstürü yeniden oku.
+            try{
+                const liste=await puanlamaFiksturMaclariniOku();
+                const raw=liste.find(x=>x.cat===(kategori==='LİSE'?'lise':'ortaokul')&&
+                    macKimligiOlustur(kategori,x.team1,x.team2)===macId&&puanlamaGecerliFiksturMaci(x));
+                if(raw)f=puanlamaFiksturMacKaydi(raw);
+            }catch(err){console.warn('Eksik maç alanları için fikstür yeniden okunamadı:',err);}
+        }
         if(!mac){
             if(!f)throw new Error('Bu maçın resmî fikstür bilgisi bulunamadı. Fikstür ekranından kontrol edin.');
             await ensureMatchExists(kategori,f.hukOkul,f.muhOkul);
@@ -2953,7 +2962,7 @@ Devam edilsin mi?`)){
                     <button id="liveViewHafta" class="btn" style="margin:0;padding:8px" onclick="yoneticiMacGorunumuSec('hafta')">Bu Hafta</button>
                     <button id="liveViewArsiv" class="btn" style="margin:0;padding:8px" onclick="yoneticiMacGorunumuSec('arsiv')">Arşiv</button>
                   </div>
-                  <div class="sure-hint">Sonucu kesinleşen veya kapatılan maçlar otomatik olarak Arşiv’e ayrılır. Puanlar, süreler ve resmî sonuçlar silinmez.</div>
+                  <div class="sure-hint">Sonucu kesinleşen maçlar otomatik olarak Arşiv’e ayrılır. Puanlar, süreler ve resmî sonuçlar silinmez.</div>
                   <div id="liveMatches" style="overflow-x:auto;">Yükleniyor...</div></div>
                 <div id="sureModalHost" class="no-print"></div>
                 <button class="btn no-print" style="background:#0f766e" onclick="yoneticiManuelMacEkleEkraniAc()">＋ Yeni / Manuel Maç Kaydet</button>
@@ -3721,7 +3730,7 @@ Devam edilsin mi?`)){
                     istisnalar+=but('✏ Resmî Puanı Manuel Onayla',`yoneticiManuelSonucEkraniAc(${f})`,'#0f766e');
                     istisnalar+=but('⚖ Hükmen Sonuç',`macHukmenKapat(${f})`,'#a16207');
                     istisnalar+=but('⛔ İki Okul da Gelmedi',`macCiftElemeIleKapat(${f})`,'#9f1239');
-                    istisnalar+=but('🛡 Gerekçeli Yönetici Kararı',`yoneticiKarariylaKapat(${f})`,'#6d28d6');
+                    istisnalar+=but('🛡 Gerekçeli Yönetici Kararı',`yoneticiKarariylaKapat(${f})`,'#6d28d9');
                     istisnalar+=but('✕ Maçı İptal Et',`macIptaliniDegistir(${f},true)`,'#475569');
                     if(!r.m._sanal)istisnalar+=but('🗑 Maç Kaydını Sil',`yoneticiMacKaydiniSil(${f})`,'#7f1d1d');
                 }else{
