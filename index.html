@@ -75,6 +75,10 @@
         .win-tag { margin-top: 12px; padding: 8px; background: rgba(16, 185, 129, 0.15); color: #34d399; border-radius: 6px; font-weight: bold; font-size: 12px; text-align: center; border: 1px solid rgba(16, 185, 129, 0.3); }
         .old-tur { margin-top: 25px; border-top: 2px dashed var(--border-color); padding-top: 15px; }
         .champ-card { background: linear-gradient(135deg, #fef08a, #facc15); border: none; padding: 30px; border-radius: 14px; text-align: center; font-size: 26px; font-weight: 800; color: #713f12; margin: 25px 0; box-shadow: 0 10px 20px rgba(250,204,21,0.3); animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 10px 20px rgba(250,204,21,0.25); }
+            50% { transform: scale(1.015); box-shadow: 0 14px 26px rgba(250,204,21,0.38); }
+        }
         
         .file-upload-wrapper { border: 2px dashed var(--border-color); padding: 20px; border-radius: 10px; text-align: center; background: #111827; margin: 15px 0; }
         
@@ -2468,7 +2472,7 @@ Devam edilsin mi?`)){
             }
         }
         if(eksikVeyaGecersiz.length){
-            return alert('Puanlar gönderilmedi. Lütfen aşağıdaki kriterleri tamamlayın veya düzeltin:\\n\\n'+eksikVeyaGecersiz.join('\\n')+'\\n\\nMevcut puanlarınız taslak olarak korunmuştur.');
+            return alert('Puanlar gönderilmedi. Lütfen aşağıdaki kriterleri tamamlayın veya düzeltin:\n\n'+eksikVeyaGecersiz.join('\n')+'\n\nMevcut puanlarınız taslak olarak korunmuştur.');
         }
         const oturum = juriOturumuGetir();
         if (!oturum) return alert('Günün jüri listesinden adınızı seçip kilitleyin.');
