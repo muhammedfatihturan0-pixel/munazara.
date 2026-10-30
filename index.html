@@ -362,6 +362,38 @@
         return 'legacy_genel';
     }
 
+    // Eski puanlarda macId eski/yanlış kalmış olsa bile yalnızca aynı kategori ve
+    // aynı iki okulun eşleşmesi doğrulanırsa bu maça bağla. Farklı maça puan taşımaz.
+    function puanKaydiBuMacaAitMi(v,macId,m,kategori){
+        if(kayitMacId(v)===macId)return true;
+        const s=v?.secim||{};
+        const kayitKategori=String(s.kategori||v.kategori||'').toLocaleUpperCase('tr-TR');
+        const hedefKategori=String(kategori||m?.kategori||secimler.kategori||'').toLocaleUpperCase('tr-TR');
+        if(!kayitKategori||!hedefKategori||kayitKategori!==hedefKategori)return false;
+        if(!s.hukOkul||!s.muhOkul||!m?.hukOkul||!m?.muhOkul)return false;
+        return okulCiftiEslesiyor(s.hukOkul,s.muhOkul,m.hukOkul,m.muhOkul);
+    }
+
+    // Tarafı okul adına göre çöz; okul adı yoksa kayıtlı takım sırasını kullan.
+    // Eski kaydın Hükümet/Muhalefet sırası ters olsa bile puan yanlış takıma yazılmaz.
+    function puanKaydiTarafiniBul(v,m){
+        const s=v?.secim||{};
+        const okul=skorEslesmeAnahtari(s.okul);
+        const h=new Set([m?.hukOkul,m?.ogrenciKaynaklari?.huk].map(skorEslesmeAnahtari).filter(Boolean));
+        const u=new Set([m?.muhOkul,m?.ogrenciKaynaklari?.muh].map(skorEslesmeAnahtari).filter(Boolean));
+        const hMi=!!okul&&h.has(okul),uMi=!!okul&&u.has(okul);
+        if(hMi!==uMi)return hMi?'huk':'muh';
+        const recorded=s.taraf==='HÜKÜMET'?'huk':s.taraf==='MUHALEFET'?'muh':'';
+        if(!recorded)return '';
+        const sh=skorEslesmeAnahtari(s.hukOkul),sm=skorEslesmeAnahtari(s.muhOkul);
+        const th=skorEslesmeAnahtari(m?.hukOkul),tm=skorEslesmeAnahtari(m?.muhOkul);
+        if(sh&&sm&&th&&tm){
+            if(sh===th&&sm===tm)return recorded;
+            if(sh===tm&&sm===th)return recorded==='huk'?'muh':'huk';
+        }
+        return recorded;
+    }
+
     function kayitMacEtiketi(v) {
         if (v?.macEtiketi) return v.macEtiketi;
         const s = v?.secim || {};
@@ -2905,6 +2937,10 @@ Devam edilsin mi?`)){
         let f=yoneticiFiksturMaclari.find(x=>x.id===macId && x.kategori===kategori);
         let s=await ref.once('value');
         let mac=s.val();
+        if(!f&&mac?.hukOkul&&mac?.muhOkul){
+            f=yoneticiFiksturMaclari.find(x=>x.kategori===kategori&&
+                okulCiftiEslesiyor(x.hukOkul,x.muhOkul,mac.hukOkul,mac.muhOkul))||null;
+        }
         if((!mac||!mac.hukOkul||!mac.muhOkul||!String(mac.durum||'').trim())&&!f){
             // Liste henüz yüklenmemişse, yalnızca bu eksik kayıt için sabit fikstürü yeniden oku.
             try{
@@ -3454,14 +3490,14 @@ Devam edilsin mi?`)){
     }
 
     function macTamamlamaOzeti(kayitlar, macId, m, okullar) {
-        const secimlerMac=kayitlar.filter(v=>kayitMacId(v)===macId);
+        const secimlerMac=kayitlar.filter(v=>puanKaydiBuMacaAitMi(v,macId,m,m.kategori||secimler.kategori));
         // Skor okul etiketi fikstürden farklı yazılmışsa aynı maçın TARAF kaydı
         // öğrenciyi doğru eşler. Farklı maç ve karşı tarafa puan taşınmaz.
         const key=(taraf,ogr)=>`${taraf}|${skorEslesmeAnahtari(ogr)}`;
         const gruplar=new Map();
         for (const v of secimlerMac) {
             const s=v.secim||{};
-            const taraf=s.taraf==='HÜKÜMET'?'huk':s.taraf==='MUHALEFET'?'muh':'';
+            const taraf=puanKaydiTarafiniBul(v,m);
             if(!taraf)continue;
             const k=key(taraf,(s.ogr||'').split(' (')[0]);
             if(!gruplar.has(k)) gruplar.set(k,new Map());
@@ -3469,7 +3505,7 @@ Devam edilsin mi?`)){
         }
         const beklenen=[];
         for (const [taraf,okul] of [['huk',m.hukOkul],['muh',m.muhOkul]]) {
-            const puanlanan=[...new Set(secimlerMac.filter(v=>v.secim?.taraf===(taraf==='huk'?'HÜKÜMET':'MUHALEFET'))
+            const puanlanan=[...new Set(secimlerMac.filter(v=>puanKaydiTarafiniBul(v,m)===taraf)
                 .map(v=>(v.secim?.ogr||'').split(' (')[0]).filter(Boolean))];
             const kaynak=guvenliKadroKaynagiBul(okullar,m,taraf,puanlanan);
             const ogrenciler=okullar[kaynak]||[];
@@ -3477,14 +3513,14 @@ Devam edilsin mi?`)){
         }
         const sorunlar=[];
         const secilenKaynaklar=['huk','muh'].map(t=>guvenliKadroKaynagiBul(okullar,m,t,
-            [...new Set(secimlerMac.filter(v=>v.secim?.taraf===(t==='huk'?'HÜKÜMET':'MUHALEFET'))
+            [...new Set(secimlerMac.filter(v=>puanKaydiTarafiniBul(v,m)===t)
                 .map(v=>(v.secim?.ogr||'').split(' (')[0]).filter(Boolean))]));
         if(secilenKaynaklar[0] && secilenKaynaklar[0]===secilenKaynaklar[1])
             sorunlar.push('İki takım aynı öğrenci kadrosuna eşleştirilemez; manuel doğrulama gerekli.');
         if (!m.hukOkul || !m.muhOkul) sorunlar.push('İki okul tanımlı değil.');
         for(const taraf of ['huk','muh']){
             const okul=taraf==='huk'?m.hukOkul:m.muhOkul;
-            const kayitlarTaraf=secimlerMac.filter(v=>v.secim?.taraf===(taraf==='huk'?'HÜKÜMET':'MUHALEFET'));
+            const kayitlarTaraf=secimlerMac.filter(v=>puanKaydiTarafiniBul(v,m)===taraf);
             const adlar=[...new Set(kayitlarTaraf.map(v=>(v.secim?.ogr||'').split(' (')[0]).filter(Boolean))];
             if(!guvenliKadroKaynagiBul(okullar,m,taraf,adlar))
                 sorunlar.push(`${okul}: doğrulanmış öğrenci kadrosu eşleşmesi bulunamadı. Kaynak belirsizse yönetici onayı gerekir.`);
@@ -3529,16 +3565,9 @@ Devam edilsin mi?`)){
     // Bu ara toplam RESMÎ sonuç değildir; kesinleştirme 3/3 kontrolü eskisi gibi kalır.
     function kayitliJuriPuanlariniTopla(kayitlar,macId,m){
         const top={huk:0,muh:0,sayi:0};
-        const h=skorEslesmeAnahtari(m.hukOkul),u=skorEslesmeAnahtari(m.muhOkul);
-        const hk=skorEslesmeAnahtari(m.ogrenciKaynaklari?.huk),uk=skorEslesmeAnahtari(m.ogrenciKaynaklari?.muh);
         for(const v of kayitlar){
-            if(kayitMacId(v)!==macId)continue;
-            const s=v.secim||{},o=skorEslesmeAnahtari(s.okul);
-            let taraf='';
-            if(o && (o===h || o===hk) && o!==u && o!==uk)taraf='huk';
-            else if(o && (o===u || o===uk) && o!==h && o!==hk)taraf='muh';
-            else if(s.taraf==='HÜKÜMET')taraf='huk';
-            else if(s.taraf==='MUHALEFET')taraf='muh';
+            if(!puanKaydiBuMacaAitMi(v,macId,m,m.kategori||secimler.kategori))continue;
+            const taraf=puanKaydiTarafiniBul(v,m);
             if(!taraf)continue;
             const valid=krit.every((k,i)=>{
                 const p=Number(v.puanlar?.[i]??v.puanlar?.[String(i)]);
@@ -3666,8 +3695,32 @@ Devam edilsin mi?`)){
 
     function canliPaneliCiz(skorlar,maclar,okullar) {
         const inferred={...maclar};
-        for(const m of yoneticiFiksturMaclari){if(!inferred[m.id])inferred[m.id]={...m,_sanal:true};else inferred[m.id]={...m,...inferred[m.id],fiksturNo:inferred[m.id].fiksturNo||m.fiksturNo};}
-        skorlar.forEach(v=>{const id=kayitMacId(v);if(!inferred[id])inferred[id]={id,etiket:kayitMacEtiketi(v),hukOkul:v.secim?.hukOkul||'',muhOkul:v.secim?.muhOkul||'',durum:'acik'};});
+        for(const f of yoneticiFiksturMaclari){
+            if(inferred[f.id]){
+                inferred[f.id]={...f,...inferred[f.id],id:f.id,kategori:f.kategori,
+                    fiksturNo:inferred[f.id].fiksturNo||f.fiksturNo,
+                    fiksturTarih:f.fiksturTarih||inferred[f.id].fiksturTarih||'',
+                    fiksturSaat:f.fiksturSaat||inferred[f.id].fiksturSaat||''};
+                continue;
+            }
+            const samePair=Object.entries(inferred).filter(([id,x])=>id!==f.id&&x?.hukOkul&&x?.muhOkul&&
+                okulCiftiEslesiyor(x.hukOkul,x.muhOkul,f.hukOkul,f.muhOkul));
+            if(samePair.length===1){
+                const [oldId,old]=samePair[0];
+                inferred[oldId]={...f,...old,id:oldId,kategori:f.kategori,
+                    fiksturNo:old.fiksturNo||f.fiksturNo,
+                    fiksturTarih:f.fiksturTarih||old.fiksturTarih||'',
+                    fiksturSaat:f.fiksturSaat||old.fiksturSaat||''};
+            }else inferred[f.id]={...f,_sanal:true};
+        }
+        skorlar.forEach(v=>{
+            const id=kayitMacId(v);
+            if(inferred[id])return;
+            const pairMatches=Object.entries(inferred).filter(([key,m])=>
+                puanKaydiBuMacaAitMi(v,key,m,secimler.kategori));
+            if(pairMatches.length===1)return;
+            inferred[id]={id,etiket:kayitMacEtiketi(v),hukOkul:v.secim?.hukOkul||'',muhOkul:v.secim?.muhOkul||'',kategori:v.secim?.kategori||v.kategori||secimler.kategori,durum:'acik'};
+        });
         const rows=[];
         Object.entries(inferred).forEach(([id,m])=>{
             const takimMetni=[m?.hukOkul,m?.muhOkul].filter(Boolean).join(' ').toLocaleLowerCase('tr-TR');
