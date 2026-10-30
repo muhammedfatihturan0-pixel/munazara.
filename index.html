@@ -3003,7 +3003,7 @@ Devam edilsin mi?`)){
             const surum=++sonYukleme;
             void puanlamaFiksturMaclariniOku().then(liste=>{
                 if(surum!==sonYukleme||!document.getElementById('liveMatches')||secimler.kategori!==currentKat)return;
-                yoneticiFiksturMaclari=liste.filter(x=>!x.isBay&&!x.isEmpty&&x.cat===(currentKat==='LİSE'?'lise':'ortaokul'))
+                yoneticiFiksturMaclari=liste.filter(x=>x.cat===(currentKat==='LİSE'?'lise':'ortaokul')&&puanlamaGecerliFiksturMaci(x))
                     .map(x=>puanlamaFiksturMacKaydi(x));
                 render();
             }).catch(err=>{
@@ -3655,9 +3655,11 @@ Devam edilsin mi?`)){
         const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
         const monday=new Date(today);
         monday.setDate(today.getDate()-((today.getDay()+6)%7));
+        const next7=new Date(today);
+        next7.setDate(today.getDate()+7);
         const sunday=new Date(monday);
         sunday.setDate(monday.getDate()+6);
-        return {today:key(today),monday:key(monday),sunday:key(sunday)};
+        return {today:key(today),monday:key(monday),sunday:key(sunday),next7:key(next7)};
     }
 
     function yoneticiMacGorunumuSec(gorunum){
@@ -3713,7 +3715,7 @@ Devam edilsin mi?`)){
             const tarih=raporFiksturTarihAnahtari(r.m.fiksturTarih||r.m.tarih||'');
             // Tarihi geçip henüz sonuçlanmamış kayıtları kaybetme; güncel haftanın
             // tüm maçları ve sonuç bekleyen eski kayıtlar bu görünümde kalır.
-            return !tarih||tarih<=aralik.sunday;
+            return !tarih||(tarih>=aralik.today&&tarih<=aralik.next7);
         });
 
         const search=skorEslesmeAnahtari(document.getElementById('liveMatchSearch')?.value||'');
@@ -3771,11 +3773,11 @@ Devam edilsin mi?`)){
         }).length;
         const weekCount=aktifler.filter(r=>{
             const t=raporFiksturTarihAnahtari(r.m.fiksturTarih||r.m.tarih||'');
-            return !t||t<=aralik.sunday;
+            return !t||(t>=aralik.today&&t<=aralik.next7);
         }).length;
         const viewConfig=[
             ['bugun','liveViewBugun',`Bugün (${todayCount})`],
-            ['hafta','liveViewHafta',`Bu Hafta (${weekCount})`],
+            ['hafta','liveViewHafta',`Önümüzdeki 7 Gün (${weekCount})`],
             ['arsiv','liveViewArsiv',`Arşiv (${archiveCount})`]
         ];
         for(const [view,id,label] of viewConfig){
