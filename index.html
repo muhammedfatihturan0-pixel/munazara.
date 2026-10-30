@@ -2904,7 +2904,7 @@ Devam edilsin mi?`)){
         let f=yoneticiFiksturMaclari.find(x=>x.id===macId && x.kategori===kategori);
         let s=await ref.once('value');
         let mac=s.val();
-        if((!mac||!mac.hukOkul||!mac.muhOkul)&&!f){
+        if((!mac||!mac.hukOkul||!mac.muhOkul||!String(mac.durum||'').trim())&&!f){
             // Liste henüz yüklenmemişse, yalnızca bu eksik kayıt için sabit fikstürü yeniden oku.
             try{
                 const liste=await puanlamaFiksturMaclariniOku();
@@ -2920,9 +2920,13 @@ Devam edilsin mi?`)){
             mac=s.val();
         }
         if(!mac)throw new Error('Maç kaydı oluşturulamadı.');
-        // Eski/eksik bir Firebase düğümünde okul alanları yoksa yalnızca boş alanları
-        // sabit fikstürden tamamla. Puan, süre, sonuç ve mevcut diğer alanlara dokunma.
-        if((!mac.hukOkul||!mac.muhOkul) && f?.hukOkul && f?.muhOkul){
+        // Eski/eksik Firebase düğümlerinde yalnızca eksik metadata onarılır.
+        // Puan, sayaç, toplam süre, sonuç ve mevcut diğer alanlar aynen korunur.
+        const durumMetni=String(mac.durum||'').trim();
+        const durumNorm=durumMetni.toLocaleLowerCase('tr-TR').replace(/ı/g,'i').replace(/ç/g,'c');
+        const durumTaninmiyor=!!durumMetni&&!['acik','open','kapali','closed','iptal','cancelled'].includes(durumNorm);
+        const durumEksik=!durumMetni;
+        if((!mac.hukOkul||!mac.muhOkul||durumEksik||(!durumTaninmiyor&&durumNorm!==durumMetni.toLocaleLowerCase('tr-TR'))) && f?.hukOkul && f?.muhOkul){
             const repaired=await ref.transaction(cur=>{
                 if(!cur)return cur;
                 const next={...cur};
@@ -2932,12 +2936,23 @@ Devam edilsin mi?`)){
                 if(!next.kategori)next.kategori=kategori;
                 if(!next.etiket)next.etiket=macEtiketi(f.hukOkul,f.muhOkul);
                 if(!next.fiksturNo)next.fiksturNo=f.fiksturNo||null;
+                const raw=String(next.durum||'').trim();
+                const norm=raw.toLocaleLowerCase('tr-TR').replace(/ı/g,'i').replace(/ç/g,'c');
+                if(!raw){
+                    // Durum alanı boşsa, kapanış kanıtı bulunmayan maç açık kabul edilir.
+                    // Kapanış işareti/sonucu varsa yanlışlıkla yeniden açma.
+                    next.durum=(next.sonuc||next.closedAt)?'kapali':'acik';
+                }else if(['acik','open'].includes(norm))next.durum='acik';
+                else if(['kapali','closed'].includes(norm))next.durum='kapali';
+                else if(['iptal','cancelled'].includes(norm))next.durum='iptal';
                 return next;
             },undefined,false);
             mac=repaired.snapshot?.val()||mac;
         }
         if(!mac.hukOkul||!mac.muhOkul)
             throw new Error('Maç kaydında okul bilgisi eksik. Sabit fikstürden güvenli onarım yapılamadı; puan ve süre verileri korunuyor.');
+        if(!String(mac.durum||'').trim())
+            throw new Error('Maç kaydının durumu eksik ve güvenli biçimde onarılamadı; puan ve süreler korunuyor.');
         return mac;
     }
     function renderYoneticiCanliPanel() {
@@ -4208,7 +4223,7 @@ Devam edilsin mi?`)){
             const m=await yoneticiMaciniHazirla(kategori,macId);
             if(!m?.hukOkul||!m?.muhOkul)throw new Error('Maç için iki okul bulunamadı.');
             if(yeniDurum==='kapali') {
-                if(m.durum!=='acik')throw new Error('Sadece açık maç kesinleştirilebilir.');
+                if(m.durum!=='acik')throw new Error(`Bu maçın kayıtlı durumu "${String(m.durum||'boş')}" görünüyor. Yalnızca gerçekten açık maç kesinleştirilebilir.`);
                 await otomatikSureleriKaydet(kategori,macId);
                 const kontrol=(await ref.once('value')).val()||m;
                 const fixture=await fiksturEslesmesiniBul(kategori,kontrol.hukOkul,kontrol.muhOkul);
