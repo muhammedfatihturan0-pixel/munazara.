@@ -286,7 +286,7 @@
 </div>
 
 <script>
-    const APP_VERSION = '3.30 · Jüri Bağımsız Puanlama ve Veri Kurtarma';
+    const APP_VERSION = '3.31 · Firebase Puan Doğrulama ve Jüri Uyarısı';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -710,10 +710,82 @@
     function offlineKuyrukGetir() {
         try { return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '{}') || {}; } catch (_) { return {}; }
     }
+    const PUAN_FIREBASE_DURUM_KEY='munazaraPuanFirebaseDurumV1';
+    let puanFirebaseAnlikDurum=null;
+
+    function puanFirebaseDurumuOku(){
+        try{return JSON.parse(localStorage.getItem(PUAN_FIREBASE_DURUM_KEY)||'null');}catch(_){return null;}
+    }
+    function puanFirebaseDurumuYaz(durum,mesaj,meta={}){
+        const kayit={durum,mesaj,kayitId:meta.kayitId||'',macId:meta.macId||'',ogr:meta.ogr||'',
+            juri:meta.juri||juriOturumuGetir()?.juri||'',updatedAt:Date.now()};
+        puanFirebaseAnlikDurum=kayit;
+        try{
+            if(durum==='success'){
+                const onceki=puanFirebaseDurumuOku();
+                if(onceki&&(!kayit.kayitId||onceki.kayitId===kayit.kayitId))localStorage.removeItem(PUAN_FIREBASE_DURUM_KEY);
+            }else localStorage.setItem(PUAN_FIREBASE_DURUM_KEY,JSON.stringify(kayit));
+        }catch(_){}
+        puanFirebaseDurumuGoster();
+    }
+    function puanFirebaseDurumunuTemizle(kayitId=''){
+        try{
+            const old=puanFirebaseDurumuOku();
+            if(!kayitId||!old?.kayitId||old.kayitId===kayitId)localStorage.removeItem(PUAN_FIREBASE_DURUM_KEY);
+        }catch(_){}
+        if(!kayitId||puanFirebaseAnlikDurum?.kayitId===kayitId)puanFirebaseAnlikDurum=null;
+        puanFirebaseDurumuGoster();
+    }
+    function puanFirebaseDurumuGoster(){
+        const els=[...document.querySelectorAll('#puanFirebaseDurumu')];
+        if(!els.length)return;
+        const q=offlineKuyrukGetir();
+        const pending=Object.values(q).filter(x=>x&&x.kayit);
+        let durum=puanFirebaseAnlikDurum||puanFirebaseDurumuOku();
+        if(pending.length){
+            const yetki=pending.some(x=>x.queueStatus==='yetki_hatasi');
+            const kapali=pending.some(x=>x.queueStatus==='mac_kapali'||x.queueStatus==='mac_iptal');
+            durum={
+                durum:'error',
+                mesaj:yetki
+                    ?'⚠ Firebase erişim yetkisi puan kaydını reddetti. Puan(lar) bu cihazın kuyruğunda; yönetici bağlantı/yetki ayarını kontrol etmeden gönderildi kabul etmeyin.'
+                    :kapali
+                        ?'⚠ Kuyrukta maç kapalı/iptal olduğu için gönderilemeyen puan var. Bu puanlar Firebase’e aktarılmadı; yöneticiyle kontrol edin.'
+                        :`⚠ ${pending.length} puan Firebase’de henüz doğrulanmadı. Bu cihazın gönderim kuyruğunda bekliyor; bağlantı gelince yeniden denenecek.`
+            };
+        }
+        for(const el of els){
+            if(!durum?.mesaj){el.style.display='none';el.textContent='';continue;}
+            el.style.display='block';
+            el.className='puanlama-bilgi'+(durum.durum==='success'?'':' hata');
+            el.setAttribute('role',durum.durum==='success'?'status':'alert');
+            el.textContent=durum.mesaj;
+        }
+    }
+    function firebasePuanKaydiEslesiyor(bulut,beklenen){
+        if(!bulut||!beklenen)return false;
+        const a=bulut.secim||{},b=beklenen.secim||{};
+        for(const k of ['macId','clientId'])if(String(bulut[k]||'')!==String(beklenen[k]||''))return false;
+        for(const k of ['kategori','juri','juriAd','okul','ogr','taraf','hukOkul','muhOkul'])
+            if(String(a[k]||'')!==String(b[k]||''))return false;
+        for(let i=0;i<13;i++){
+            const x=Number(bulut.puanlar?.[i]??bulut.puanlar?.[String(i)]);
+            const y=Number(beklenen.puanlar?.[i]??beklenen.puanlar?.[String(i)]);
+            if(!Number.isInteger(x)||x!==y)return false;
+        }
+        return true;
+    }
+    async function firebasePuanKaydiniDogrula(ref,beklenen){
+        const snap=await ref.once('value');
+        const bulut=snap.val();
+        return {ok:firebasePuanKaydiEslesiyor(bulut, beklenen),bulut};
+    }
+
 
     function offlineKuyrukKaydet(q) {
         localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(q));
         networkDurumunuGuncelle();
+        puanFirebaseDurumuGoster();
     }
 
     function puaniKuyrugaEkle(item) {
@@ -721,6 +793,9 @@
         const key = `${item.kategori}__${item.kayitId}`;
         q[key] = { ...item, queuedAt: Date.now(), queueStatus: 'bekliyor' };
         offlineKuyrukKaydet(q);
+        puanFirebaseDurumuYaz('queued','⚠ Puan bu cihazda kuyruğa alındı; Firebase’de henüz doğrulanmadı. Bağlantı geldiğinde yeniden gönderilecek. Bu uyarı kalkmadan kaydı gönderildi saymayın.',{
+            kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
+        });
     }
 
     async function offlineKuyruguGonder() {
@@ -740,7 +815,10 @@
                     continue;
                 }
                 const rec = { ...item.kayit, serverSyncedAt: firebase.database.ServerValue.TIMESTAMP, offlineSynced: true };
-                await db.ref(`puanlar/${item.kategori}/${item.kayitId}`).set(rec);
+                const puanRef=db.ref(`puanlar/${item.kategori}/${item.kayitId}`);
+                await puanRef.set(rec);
+                const dogrulama=await firebasePuanKaydiniDogrula(puanRef,rec);
+                if(!dogrulama.ok)throw new Error('Firebase kuyruğa alınan puanı geri okuyup doğrulayamadı. Kayıt kuyrukta korunuyor.');
                 if(item.taslakYolu)await db.ref(item.taslakYolu).transaction(cur=>{
                     if(!cur)return cur;
                     if(cur.durum==='gonderildi')return cur;
@@ -752,16 +830,21 @@
                 // Puan kuyruğunu senkronize etmek ortak konuşma sayacını KAPATMAZ.
                 delete q[key];
                 degisti = true;
+                puanFirebaseDurumuTemizle(item.kayitId);
             } catch (err) {
                 console.warn('Offline kuyruk gönderilemedi:', err);
                 const code = String(err?.code || '').toLowerCase();
                 if (code.includes('permission')) q[key].queueStatus = 'yetki_hatasi';
-                else q[key].queueStatus = 'bekliyor';
+                else q[key].queueStatus = 'dogrulama_bekliyor';
+                puanFirebaseDurumuYaz('error','⚠ Kuyruktaki puan Firebase’den doğrulanamadı. Kayıt bu cihazda korunuyor; yönetici kontrolü olmadan gönderildi kabul etmeyin.',{
+                    kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
+                });
                 degisti = true;
                 break;
             }
         }
         if (degisti) offlineKuyrukKaydet(q);
+        puanFirebaseDurumuGoster();
     }
 
     function networkDurumunuGuncelle() {
@@ -776,7 +859,7 @@
         const n = Object.keys(q).length;
         const online = navigator.onLine && firebaseBagli;
         el.innerHTML = `<span class="status-dot ${online?'online':'offline'}"></span>${online?'Çevrimiçi':'Çevrimdışı'}${n?` · Kuyruk: ${n}`:''}`;
-        el.title = n ? 'Gönderilmeyi bekleyen yerel puan kaydı var.' : 'Tüm puanlar senkron.';
+        el.title = n ? 'Firebase’den doğrulanmamış yerel puan kaydı var.' : 'Yerel gönderim kuyruğu boş; bu, açık puan taslaklarının resmî kayda gönderildiği anlamına gelmez.';
     }
 
     async function ensureMatchExists(kategori, hukOkul, muhOkul) {
@@ -1428,6 +1511,7 @@
                     <button class="btn" style="margin:0;" onclick="anaMenu()">← Ana Ekran</button>
                 </div>
                 ${juriHtml}
+                <div id="puanFirebaseDurumu" class="puanlama-bilgi hata" role="alert" style="display:none;"></div>
                 <div class="btn-grid" style="grid-template-columns: 1fr 1fr; margin-bottom:16px;">
                     <button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this, 'ORTAOKUL', 'puanlama')">ORTAOKUL</button>
                     <button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this, 'LİSE', 'puanlama')">LİSE</button>
@@ -1458,6 +1542,7 @@
                 <div style="font-size:11px;color:#cbd5e1;line-height:1.45;margin-top:-3px;">Bu isteğe bağlı işlem aynı öğrenci için bütün jüri cihazlarındaki ortak 6 dakikalık sayacı yeniden başlatır; puan kayıtlarını silmez. Kullanım ve iptal bilgisi yönetici günlüğüne yazılır.</div>
                 <button class="btn" style="background:#475569;" onclick="anaMenu()">← Ana Menü</button>
             </div>`;
+        puanFirebaseDurumuGoster();
         void juriPaneliniGuncelle();
         void puanlamaVerileriniYukle(korunacakMacId);
     }
@@ -2309,10 +2394,12 @@ Devam edilsin mi?`)){
                     <div style="font-size:12px;line-height:1.5;color:#cbd5e1;margin:-3px 0 10px;">Ortak süre 6 dakikadır. Süre bitince puan seçimi ve gönderme için en fazla 10 saniye ek süre tanınır; bu pencere kapanınca giriş engellenir. Sorun yaşandıysa yalnızca gerekçeyle ve denetim kaydı oluşturarak ortak süre sıfırlanabilir.</div>
                     <div id="juriSureBilgisi" class="puanlama-bilgi">Resmî öğrenci süresi kontrol ediliyor…</div>
                     <div id="kriterListesi"></div>
-                    <div id="puanTaslakDurumu" class="puanlama-bilgi" style="font-size:12px;">Puan seçimleri otomatik olarak cihazda, bağlantı varsa Firebase’de taslak kaydedilir.</div>
+                    <div id="puanTaslakDurumu" class="puanlama-bilgi" style="font-size:12px;">Puan seçimleri otomatik olarak cihazda, bağlantı varsa Firebase’de taslak kaydedilir. Bu taslak, resmî puan kaydı değildir.</div>
+                    <div id="puanFirebaseDurumu" class="puanlama-bilgi hata" role="alert" style="display:none;"></div>
                     <button id="btnPuanGonder" class="btn" style="background:var(--success); border:none; margin-top:25px; padding:16px; font-size:16px;" onclick="puanlariGonder()">Puanları Gönder ✓</button>
                     <button class="btn" style="background:#475569" onclick="renderPuanlamaSecim()">← Geri Dön</button></div>`;
         document.getElementById('app').innerHTML = html;
+        puanFirebaseDurumuGoster();
         ortakPuanArayuzunuGuncelle();
         void juriSureOturumLogla('acildi',{izinVerilenEkSureSaniye:ORTAK_PUAN_EK_SURE,
             surePenceresi:'6 dakika + en fazla 10 saniye',sifirlamaSecenegiSunuldu:true,
@@ -2397,6 +2484,12 @@ Devam edilsin mi?`)){
             localUpdatedAt: yerelZaman,
             version: 3
         };
+        let puanKayitRef=null;
+        let firebaseYazmaDenendi=false;
+        let firebaseKaydiDogrulandi=false;
+        puanFirebaseDurumuYaz('pending','Puan gönderimi başlatıldı. Firebase kaydı geri okunup doğrulanana kadar gönderildi sayılmayacak.',{
+            kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
+        });
 
         try {
             if (!navigator.onLine || !firebaseBagli) {
@@ -2415,8 +2508,8 @@ Devam edilsin mi?`)){
 
             // Her jüri, kendi deterministik puan kayıt anahtarına yazar. Bütün kategori
             // kayıtlarını okumak veya kategori düğümüne toplu update göndermek gerekmez.
-            const kayitRef=db.ref(`puanlar/${secimler.kategori}/${kayitId}`);
-            const oncekiSnap=await kayitRef.once('value');
+            puanKayitRef=db.ref(`puanlar/${secimler.kategori}/${kayitId}`);
+            const oncekiSnap=await puanKayitRef.once('value');
             const onceki=oncekiSnap.val()||null;
             if(onceki){
                 const ogrAd=(secimler.ogr||'').split(' (')[0];
@@ -2446,7 +2539,14 @@ Devam edilsin mi?`)){
             aktifOrtakSureVerisi=sonTimer;
             // Doğrudan yalnızca bu jüriye ait kaydı yaz. Başka jürilerin kayıtları ve sayaç
             // bu işlem tarafından hiçbir zaman güncellenmez.
-            await kayitRef.set(kayit);
+            firebaseYazmaDenendi=true;
+            await puanKayitRef.set(kayit);
+            const puanDogrulama=await firebasePuanKaydiniDogrula(puanKayitRef,kayit);
+            if(!puanDogrulama.ok)throw new Error('Firebase yazımından sonra puan kaydı geri okundu ancak jüri/öğrenci/13 kriter doğrulaması eşleşmedi. Puan gönderildi kabul edilmedi.');
+            firebaseKaydiDogrulandi=true;
+            puanFirebaseDurumuYaz('success',`✓ ${oturum.juri} · ${secimler.ogr}: 13/13 kriter Firebase’den geri okunarak doğrulandı.`,{
+                kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
+            });
             const puanYedekYolu=`arsiv/juriPuanYedekleri/${secimler.kategori}/${mac.id}/${kayitId}`;
             try{
                 await db.ref(puanYedekYolu+'/sonDurum').set({...kayit,yedekAt:firebase.database.ServerValue.TIMESTAMP});
@@ -2456,8 +2556,13 @@ Devam edilsin mi?`)){
             eskiJuriPuanMukerrerleriniTemizle(secimler.kategori,kayitId,kayitId);
             await juriSureOturumLogunuGuncelle({durum:'puanlar_gonderildi',puanGonderildi:true,
                 puanGonderildiAt:firebase.database.ServerValue.TIMESTAMP,puanGondermeAniClient:puanGondermeAni,
-                kaydedilenKayitId:kayitId});
-            alert(onceki ? 'Bu jüriye ait puanlar güncellendi.' : 'Puanlar başarıyla buluta gönderildi!');
+                kaydedilenKayitId:kayitId}).catch(logErr=>{
+                    console.warn('Puan Firebase’de doğrulandı ancak jüri işlem günlüğü yazılamadı:',logErr);
+                    puanFirebaseDurumuYaz('warning','✓ Puan Firebase’de doğrulandı. ⚠ Jüri işlem günlüğü yazılamadı; puanın kendisi kaydedilmiş durumda.',{
+                        kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
+                    });
+                });
+            alert(onceki ? '✓ Güncellenen puan Firebase’den geri okunarak doğrulandı.' : '✓ Puanlar Firebase’e kaydedildi ve geri okunarak doğrulandı.');
             // Turnuva ağacını yansıtma ikincil işlemdir; başarısızlığı kaydedilmiş puanı geri almış gibi göstermez.
             try{await turnuvaAgacinaPuanYansit(secimler.kategori, mac.hukOkul, mac.muhOkul);}
             catch(agacErr){console.warn('Puan kaydedildi ancak turnuva ağacı güncellenemedi:',agacErr);}
@@ -2466,17 +2571,46 @@ Devam edilsin mi?`)){
             renderPuanlamaSecim(mac.id);
         } catch (err) {
             console.error('Puan gönderme hatası:', err);
-            const code = String(err?.code || '').toLowerCase();
-            if (!code.includes('permission')) {
-                puaniKuyrugaEkle({ kategori:secimler.kategori, macId:mac.id, kayitId, kayit:{...kayitTemel, createdAt:yerelZaman, updatedAt:yerelZaman, queuedOffline:true} });
-                await juriSureOturumLogunuGuncelle({durum:'puanlar_kuyruga_alindi_hata',puanGonderildi:false,puanKuyrugaAlindi:true,
-                    puanKuyrukHatasi:String(err?.message||err),puanGondermeAniClient:puanGondermeAni});
-                alert('Bağlantı sorunu nedeniyle puan yerel kuyruğa alındı. İnternet geldiğinde otomatik gönderilecek; ortak sayaç kapatılmadı.');
-                secimler.ogr = '';
+            const code=String(err?.code||'').toLowerCase();
+            // set() hata döndürmüş olsa bile sunucu yazımı almış olabilir; kuyruğa almadan önce oku.
+            if(firebaseYazmaDenendi&&!firebaseKaydiDogrulandi&&puanKayitRef){
+                try{
+                    const tekrar=await firebasePuanKaydiniDogrula(puanKayitRef,kayitTemel);
+                    if(tekrar.ok)firebaseKaydiDogrulandi=true;
+                }catch(readErr){console.warn('Belirsiz Firebase yazımı geri okunamadı:',readErr);}
+            }
+            if(firebaseKaydiDogrulandi){
+                puanFirebaseDurumuYaz('success',`✓ ${oturum.juri} · ${secimler.ogr}: puan Firebase’den geri okunarak doğrulandı. Sonraki yardımcı işlemde hata oluştu; puan kaydı korunuyor.`,{
+                    kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
+                });
+                try{await puanTaslaginiSil(aktifPuanTaslak);}catch(cleanErr){console.warn('Kaydedilmiş puanın taslağı temizlenemedi:',cleanErr);}
+                alert('Puan Firebase’de bulundu ve 13 kriter doğrulandı. Sonraki yardımcı işlemde hata oluştu; puan kaydı kaybolmadı.');
+                secimler.ogr='';
                 secimleriKaydet();
                 renderPuanlamaSecim(mac.id);
-            } else {
-                alert('Puan gönderilemedi: Firebase erişim yetkisi reddedildi.');
+            }else if(code.includes('permission')){
+                puanFirebaseDurumuYaz('error','⛔ Firebase puan yazımına izin vermedi. Puan gönderilmedi; 13 kriterli taslak bu cihazda korundu. Yetki sorunu çözülmeden bu kaydı gönderildi kabul etmeyin.',{
+                    kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
+                });
+                alert('Firebase erişim yetkisi puan kaydını reddetti. Puan Firebase’e kaydedilmedi. Taslak bu ekranda ve cihazda korunuyor.');
+            }else{
+                try{
+                    puaniKuyrugaEkle({kategori:secimler.kategori,macId:mac.id,kayitId,
+                        kayit:{...kayitTemel,createdAt:yerelZaman,updatedAt:yerelZaman,queuedOffline:true}});
+                    await juriSureOturumLogunuGuncelle({durum:'puanlar_kuyruga_alindi_hata',puanGonderildi:false,puanKuyrugaAlindi:true,
+                        puanKuyrukHatasi:String(err?.message||err),puanGondermeAniClient:puanGondermeAni}).catch(logErr=>console.warn('Kuyruk günlüğü yazılamadı:',logErr));
+                    puanFirebaseDurumuYaz('queued','⚠ Firebase kaydı geri okunarak doğrulanamadı. Puan bu cihazın kuyruğunda korundu; gönderildi kabul edilmedi. Bağlantı gelince yeniden denenecek.',{
+                        kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
+                    });
+                    alert('Puan Firebase’de doğrulanamadı. Bu cihazın kuyruğunda ve taslakta korundu; gönderildi kabul edilmedi. İnternet geldiğinde yeniden denenecek.');
+                }catch(queueErr){
+                    console.error('Yerel puan kuyruğu da yazılamadı:',queueErr);
+                    puanFirebaseDurumuYaz('error','⛔ Firebase kaydı doğrulanamadı ve yerel kuyruk da yazılamadı. Puanlama ekranını kapatmayın; seçili 13 kriter hâlâ ekranda. Bağlantı/yetki kontrolü yapın.',{
+                        kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
+                    });
+                    alert('Puan Firebase’de doğrulanamadı ve yerel kuyruk yazılamadı. Ekranı kapatmayın; seçilen puanlar hâlâ formda.');
+                }
+                // Hata durumunda öğrenci seçimini ve formu temizleme; jüri aynı puanları görebilsin.
             }
         } finally {
             puanGonderiliyor = false;
