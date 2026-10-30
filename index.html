@@ -781,6 +781,183 @@
         anaMenu();
     }
 
+    async function veriYedekleriniHazirla(kategori){
+        const [pSnap,mSnap,pBakSnap,tBakSnap,sBakSnap]=await Promise.all([
+            db.ref('puanlar/'+kategori).once('value'),
+            db.ref('maclar/'+kategori).once('value'),
+            db.ref('arsiv/juriPuanYedekleri/'+kategori).once('value'),
+            db.ref('arsiv/konusmaSureYedekleri/'+kategori).once('value'),
+            db.ref('arsiv/macSureYedekleri/'+kategori).once('value')
+        ]);
+        const pBak=pBakSnap.val()||{},tBak=tBakSnap.val()||{},sBak=sBakSnap.val()||{};
+        const liveScores={},liveMatches={};
+        pSnap.forEach(c=>{
+            const v=c.val();if(!v?.secim||!v?.puanlar)return;
+            const mid=kayitMacId(v),natural=puanKayitKimligi(v.secim,mid);
+            if(!liveScores[mid])liveScores[mid]={};
+            liveScores[mid][natural]=v;
+        });
+        mSnap.forEach(c=>liveMatches[c.key]=c.val());
+        const updates={};let seedScore=0,seedTimer=0,seedSummary=0;
+        for(const [mid,rows] of Object.entries(liveScores)){
+            for(const [natural,v] of Object.entries(rows)){
+                if(pBak[mid]?.[natural]?.sonDurum)continue;
+                const base=`arsiv/juriPuanYedekleri/${kategori}/${mid}/${natural}`;
+                const y={...v,macId:mid,yedekClientAt:Date.now(),yedekOlayi:'mevcut_kayit_koruma'};
+                updates[base+'/sonDurum']=y;
+                updates[base+'/gecmis/'+String(Date.now()+seedScore)]=y;seedScore++;
+            }
+        }
+        for(const [mid,m] of Object.entries(liveMatches)){
+            for(const [timerId,v] of Object.entries(m?.konusmaSayaclari||{})){
+                if(tBak[mid]?.[timerId]?.sonDurum)continue;
+                const base=`arsiv/konusmaSureYedekleri/${kategori}/${mid}/${timerId}`;
+                const y={...v,macMeta:{id:mid,kategori,hukOkul:m.hukOkul||'',muhOkul:m.muhOkul||'',
+                    etiket:m.etiket||'',durum:m.durum||'acik',fiksturNo:m.fiksturNo||null,
+                    ogrenciKaynaklari:m.ogrenciKaynaklari||null},
+                    yedekClientAt:Date.now(),yedekOlayi:'mevcut_sayac_koruma'};
+                updates[base+'/sonDurum']=y;
+                updates[base+'/gecmis/'+String(Date.now()+seedTimer)]=y;seedTimer++;
+            }
+            if(m?.sureEsitlik&&!sBak[mid]?.sonDurum){
+                const base=`arsiv/macSureYedekleri/${kategori}/${mid}`;
+                const y={...m.sureEsitlik,yedekClientAt:Date.now(),yedekOlayi:'mevcut_mac_suresi_koruma'};
+                updates[base+'/sonDurum']=y;
+                updates[base+'/gecmis/'+String(Date.now()+seedSummary)]=y;seedSummary++;
+            }
+        }
+        if(Object.keys(updates).length)await db.ref().update(updates);
+        const scoreArchive={...pBak},timerArchive={...tBak},summaryArchive={...sBak};
+        for(const [path,value] of Object.entries(updates)){
+            const parts=path.split('/');
+            if(parts[1]==='juriPuanYedekleri'){
+                const mid=parts[3],natural=parts[4];
+                if(parts[5]==='sonDurum'){
+                    scoreArchive[mid]=scoreArchive[mid]||{};scoreArchive[mid][natural]=scoreArchive[mid][natural]||{};
+                    scoreArchive[mid][natural].sonDurum=value;
+                }
+            }else if(parts[1]==='konusmaSureYedekleri'){
+                const mid=parts[3],id=parts[4];
+                if(parts[5]==='sonDurum'){
+                    timerArchive[mid]=timerArchive[mid]||{};timerArchive[mid][id]=timerArchive[mid][id]||{};
+                    timerArchive[mid][id].sonDurum=value;
+                }
+            }else if(parts[1]==='macSureYedekleri'&&parts[4]==='sonDurum'){
+                const mid=parts[3];summaryArchive[mid]=summaryArchive[mid]||{};summaryArchive[mid].sonDurum=value;
+            }
+        }
+        const macIds=new Set([...Object.keys(liveScores),...Object.keys(liveMatches),
+            ...Object.keys(scoreArchive),...Object.keys(timerArchive),...Object.keys(summaryArchive)]);
+        const rows=[];
+        for(const mid of macIds){
+            const scores=Object.entries(scoreArchive[mid]||{}).filter(([_,x])=>x?.sonDurum?.secim&&x?.sonDurum?.puanlar);
+            const live=liveScores[mid]||{};
+            const missingScores=scores.filter(([id])=>!live[id]).length;
+            const timers=Object.entries(timerArchive[mid]||{}).filter(([_,x])=>x?.sonDurum?.baslangicAt);
+            const currentTimers=liveMatches[mid]?.konusmaSayaclari||{};
+            const missingTimers=timers.filter(([id])=>!currentTimers[id]).length;
+            const summary=summaryArchive[mid]?.sonDurum||null;
+            const missingSummary=!!(summary&&!liveMatches[mid]?.sureEsitlik);
+            const sample=scores[0]?.[1]?.sonDurum?.secim||{};
+            const meta=timers[0]?.[1]?.sonDurum?.macMeta||{};
+            rows.push({kategori,macId:mid,etiket:liveMatches[mid]?.etiket||meta.etiket||
+                (sample.hukOkul&&sample.muhOkul?macEtiketi(sample.hukOkul,sample.muhOkul):mid),
+                scoreCount:scores.length,missingScores,timerCount:timers.length,missingTimers,
+                missingSummary,hasBackups:scores.length+timers.length+(summary?1:0)>0});
+        }
+        rows.sort((a,b)=>a.etiket.localeCompare(b.etiket,'tr'));
+        return {kategori,rows,seedScore,seedTimer,seedSummary};
+    }
+
+    async function renderVeriKurtarma(){
+        if(!adminYetkiliMi())return alert('Bu bölüm yalnızca yönetici tarafından açılabilir.');
+        dinleyicileriTemizle();
+        document.getElementById('app').innerHTML=`<div class="card" style="max-width:1100px;">
+            <h2>🛟 Puan ve Süre Yedekleri</h2>
+            <div class="puanlama-bilgi">Bu ekran mevcut puan ve süreleri yedekler. Eksik kayıtları Firebase arşivinden geri yükler; var olan puanların, sayaçların ve resmî sonuçların üzerine yazmaz. İlk açılışta mevcut veriler için başlangıç yedeği hazırlanır.</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn" style="width:auto;background:#1d4ed8" onclick="renderVeriKurtarma()">↻ Yedekleri tara</button>
+                <button class="btn" style="width:auto;background:#475569" onclick="renderYoneticiMenu()">← Yönetici menüsü</button>
+            </div>
+            <div id="veriKurtarmaDurum" class="puanlama-bilgi">ORTAOKUL ve LİSE kayıtları taranıyor…</div>
+            <div id="veriKurtarmaListe"></div>
+        </div>`;
+        const host=document.getElementById('veriKurtarmaListe'),durum=document.getElementById('veriKurtarmaDurum');
+        try{
+            const results=await Promise.all(['ORTAOKUL','LİSE'].map(veriYedekleriniHazirla));
+            if(!host||!durum)return;
+            const total=results.reduce((n,x)=>n+x.rows.length,0);
+            const backed=results.reduce((n,x)=>n+x.rows.filter(r=>r.hasBackups).length,0);
+            const missing=results.reduce((n,x)=>n+x.rows.reduce((a,r)=>a+r.missingScores+r.missingTimers+(r.missingSummary?1:0),0),0);
+            const seeded=results.reduce((n,x)=>n+x.seedScore+x.seedTimer+x.seedSummary,0);
+            durum.innerHTML=`Tarama tamamlandı. ${backed}/${total} maç için yedek bulundu · ${missing} eksik kayıt · ${seeded} mevcut kayıt için ilk yedek oluşturuldu.`;
+            let html='';
+            for(const group of results){
+                html+=`<h3>${group.kategori}</h3><div style="overflow-x:auto"><table class="tutanak-table"><tr><th>Maç</th><th>Yedek Puan</th><th>Eksik Puan</th><th>Yedek Süre</th><th>Eksik Süre</th><th>İşlem</th></tr>`;
+                for(const r of group.rows){
+                    const missing=r.missingScores+r.missingTimers+(r.missingSummary?1:0);
+                    html+=`<tr><td>${htmlEscape(r.etiket)}</td><td>${r.scoreCount}</td><td class="${r.missingScores?'jury-missing':'jury-ok'}">${r.missingScores}</td><td>${r.timerCount+(r.missingSummary?1:0)}</td><td class="${missing?'jury-missing':'jury-ok'}">${r.missingTimers+(r.missingSummary?1:0)}</td><td>${missing?`<button class="btn" style="padding:7px;margin:0;background:#0f766e" onclick="veriYedegindenKurtar('${group.kategori}','${r.macId}')">Eksikleri kurtar</button>`:'—'}</td></tr>`;
+                }
+                html+='</table></div>';
+            }
+            host.innerHTML=html||'<div class="puanlama-bilgi">Henüz puan veya süre yedeği bulunmuyor.</div>';
+        }catch(err){
+            if(durum)durum.textContent='Yedek taraması başarısız: '+String(err?.message||err);
+        }
+    }
+
+    async function veriYedegindenKurtar(kategori,macId){
+        if(!adminYetkiliMi())return alert('Yönetici yetkisi gerekiyor.');
+        if(!navigator.onLine||!firebaseBagli)return alert('Yedekten kurtarma için Firebase bağlantısı gerekir.');
+        if(!confirm('Eksik kayıtlar yedekten geri yüklenecek. Mevcut puanlar, süreler ve sonuçlar değiştirilmeyecek. Devam edilsin mi?'))return;
+        let puan=0,sayac=0,toplamSure=0;
+        try{
+            const base=`arsiv/juriPuanYedekleri/${kategori}/${macId}`;
+            const tBase=`arsiv/konusmaSureYedekleri/${kategori}/${macId}`;
+            const [pSnap,tSnap,sSnap,mSnap]=await Promise.all([
+                db.ref(base).once('value'),db.ref(tBase).once('value'),
+                db.ref(macSureYedekYolu(kategori,macId)+'/sonDurum').once('value'),
+                db.ref(`maclar/${kategori}/${macId}`).once('value')
+            ]);
+            const pItems=pSnap.val()||{},tItems=tSnap.val()||{},summary=sSnap.val()||null;
+            const scoreEntries=Object.entries(pItems).filter(([_,x])=>x?.sonDurum?.secim&&x?.sonDurum?.puanlar);
+            const timerEntries=Object.entries(tItems).filter(([_,x])=>x?.sonDurum?.baslangicAt);
+            const scoreSample=scoreEntries[0]?.[1]?.sonDurum;
+            const timerSample=timerEntries[0]?.[1]?.sonDurum;
+            const seed=timerSample?.macMeta|| (scoreSample?.secim?.hukOkul&&scoreSample?.secim?.muhOkul?{
+                id:macId,kategori,hukOkul:scoreSample.secim.hukOkul,muhOkul:scoreSample.secim.muhOkul,
+                etiket:macEtiketi(scoreSample.secim.hukOkul,scoreSample.secim.muhOkul),durum:'acik'}:null);
+            let liveMac=mSnap.val();
+            if(!liveMac&&seed){
+                const restored=await db.ref(`maclar/${kategori}/${macId}`).transaction(cur=>cur||{
+                    ...seed,id:macId,kategori,durum:['acik','kapali','iptal'].includes(seed.durum)?seed.durum:'acik',
+                    createdAt:Date.now(),updatedAt:Date.now(),restoredFromArchive:true,restoredAt:Date.now()
+                },undefined,false);
+                liveMac=restored.snapshot?.val()||null;
+            }
+            for(const [natural,x] of scoreEntries){
+                const target=db.ref(`puanlar/${kategori}/${natural}`);
+                const result=await target.transaction(cur=>cur||{...x.sonDurum,restoredFromArchive:true,restoredAt:Date.now()},undefined,false);
+                if(result.committed)puan++;
+            }
+            for(const [timerId,x] of timerEntries){
+                const target=db.ref(`maclar/${kategori}/${macId}/konusmaSayaclari/${timerId}`);
+                const result=await target.transaction(cur=>cur||{...x.sonDurum,restoredFromArchive:true,restoredAt:Date.now()},undefined,false);
+                if(result.committed)sayac++;
+            }
+            if(summary?.ogrenciler){
+                const result=await db.ref(`maclar/${kategori}/${macId}`).transaction(cur=>{
+                    if(!cur||cur.sureEsitlik)return cur;
+                    cur.sureEsitlik={...summary,restoredFromArchive:true,restoredAt:Date.now()};
+                    return cur;
+                },undefined,false);
+                if(result.committed)toplamSure++;
+            }
+            alert(`Kurtarma tamamlandı. Geri yüklenen: ${puan} jüri puanı, ${sayac} öğrenci sayacı, ${toplamSure} maç süre toplamı. Var olan kayıtlar değiştirilmedi.`);
+            await renderVeriKurtarma();
+        }catch(err){alert('Yedekten kurtarma tamamlanamadı: '+String(err?.message||err));}
+    }
+
     function renderYoneticiMenu() {
         if(!adminYetkiliMi()) return sifreliModulKontrol('yonetici');
         dinleyicileriTemizle();
@@ -795,6 +972,7 @@
                      <button class="home-link" onclick="showReport()"><span><span class="home-card-title">📊 Özel Sonuçlar ve Tutanak</span><span class="home-card-desc">Öğrenci/jüri puanları, Excel ve tek maça odaklı kompakt A4 yatay PDF.</span></span><span class="home-arrow">→</span></button>
                     <button class="home-link" onclick="renderOgrenci()"><span><span class="home-card-title">🏫 Okullar ve Öğrenciler</span><span class="home-card-desc">Öğrenci kayıtları, okul/öğrenci adı düzenleme, Excel aktarma ve gerektiğinde liste eşleştirme.</span></span><span class="home-arrow">→</span></button>
                     <button class="home-link" onclick="renderJuriSureLoglari()"><span><span class="home-card-title">🧾 Jüri / Süre İşlem Günlüğü</span><span class="home-card-desc">Puanlama ekranı açılışlarını, süre aşımı engellerini ve isteğe bağlı sıfırlama işlemlerini; başarı/iptal durumlarıyla birlikte görüntüle.</span></span><span class="home-arrow">→</span></button>
+                    <button class="home-link" onclick="renderVeriKurtarma()"><span><span class="home-card-title">🛟 Puan ve Süre Yedekleri</span><span class="home-card-desc">Eksik jüri puanlarını, öğrenci sayaçlarını ve maç süre toplamlarını yedeklerden mevcut kayıtların üzerine yazmadan kurtar.</span></span><span class="home-arrow">→</span></button>
                 </div>
                 <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
                     <button class="btn" style="width:auto;min-width:170px;" onclick="anaMenu()">← Ana Menü</button>
@@ -1597,10 +1775,28 @@
     async function ortakSureYedeginiKaydet(kategori,macId,timerId,veri,olay='guncelleme'){
         if(!veri)return;
         const at=Date.now();
-        const yedek={...veri,yedekClientAt:at,yedekOlayi:olay};
+        const m=puanlamaMaclar.get(macId)||mevcutMacBilgisi()||{};
+        const yedek={...veri,macMeta:{id:macId,kategori,hukOkul:m.hukOkul||secimler.hukOkul||'',
+            muhOkul:m.muhOkul||secimler.muhOkul||'',etiket:m.etiket||'',durum:m.durum||'acik',
+            fiksturNo:m.fiksturNo||null,ogrenciKaynaklari:m.ogrenciKaynaklari||null},
+            yedekClientAt:at,yedekOlayi:olay};
         const yol=ortakSureYedekYolu(kategori,macId,timerId);
-        await db.ref(yol+'/sonDurum').set(yedek);
+        await db.ref(yol+'/sonDurum').transaction(cur=>{
+            if(cur&&Number(cur.yedekClientAt||0)>at)return cur;
+            return yedek;
+        },undefined,false);
         await db.ref(yol+'/gecmis/'+String(at)).set(yedek);
+    }
+    function macSureYedekYolu(kategori,macId){return `arsiv/macSureYedekleri/${kategori}/${macId}`;}
+    async function macSureYedeginiKaydet(kategori,macId,sure,olay='guncelleme'){
+        if(!sure)return;
+        const at=Date.now(),path=macSureYedekYolu(kategori,macId);
+        const yedek={...sure,yedekClientAt:at,yedekOlayi:olay};
+        await db.ref(path+'/sonDurum').transaction(cur=>{
+            if(cur&&Number(cur.yedekClientAt||0)>at)return cur;
+            return yedek;
+        },undefined,false);
+        await db.ref(path+'/gecmis/'+String(at)).set(yedek);
     }
     const JURI_SURE_AUDIT_OTURUM_KEY='munazaraJuriSureAuditOturumV1';
     const ortakSureUyariVerilenler=new Set();
@@ -3048,7 +3244,7 @@ Devam edilsin mi?`)){
         if(sureEsitlemeDevam.has(key)||!firebaseBagli||!navigator.onLine)return;
         sureEsitlemeDevam.add(key);
         try{
-            await db.ref(`maclar/${kategori}/${macId}`).transaction(cur=>{
+            const result=await db.ref(`maclar/${kategori}/${macId}`).transaction(cur=>{
                 if(!cur)return;
                 const o=otomatikSureleriDerle(cur);
                 if(!o.sayi||cur.sureEsitlik?.kaynak==='manuel' ||
@@ -3062,6 +3258,8 @@ Devam edilsin mi?`)){
                     updatedAt:Date.now()};
                 return cur;
             },undefined,false);
+            if(result.committed&&result.snapshot.val()?.sureEsitlik)
+                await macSureYedeginiKaydet(kategori,macId,result.snapshot.val().sureEsitlik,'otomatik_sure_hesaplama');
         }catch(e){console.warn('Otomatik konuşma süresi toplama:',e);}
         finally{sureEsitlemeDevam.delete(key);}
     }
@@ -3148,6 +3346,8 @@ Devam edilsin mi?`)){
             catch(e){return alert('Denetim kaydı oluşturulamadı; süre değiştirilmedi: '+String(e?.message||e));}
         }
         try{
+            if(mac.sureEsitlik)await macSureYedeginiKaydet(kategori,macId,mac.sureEsitlik,'manuel_sure_degisim_oncesi')
+                .catch(e=>console.warn('Önceki süre yedeği alınamadı:',e));
             const r=await db.ref(`maclar/${kategori}/${macId}`).transaction(cur=>{
                 if(!cur||skorEslesmeAnahtari(cur.hukOkul)!==skorEslesmeAnahtari(mac.hukOkul)||skorEslesmeAnahtari(cur.muhOkul)!==skorEslesmeAnahtari(mac.muhOkul))return;
                 if(kapaliBelgeleme){
@@ -3164,6 +3364,8 @@ Devam edilsin mi?`)){
                 cur.updatedAt=Date.now();return cur;
             },undefined,false);
             if(!r.committed)return alert('Süre kaydı başka cihazda değişti veya maç kapatıldı. Tekrar açıp kontrol edin.');
+            await macSureYedeginiKaydet(kategori,macId,r.snapshot.val()?.sureEsitlik,'manuel_sure_guncellemesi')
+                .catch(e=>console.warn('Manuel süre yedeği yazılamadı:',e));
             sureModalKapat();
             if(auditRef){
                 try{await auditRef.update({durum:'kaydedildi',kayitAt:firebase.database.ServerValue.TIMESTAMP});}
