@@ -2886,6 +2886,7 @@ Devam edilsin mi?`)){
     let yoneticiFiksturMaclari = [];
     let yoneticiResmiFiksturDurumu = null;
     let yoneticiSonPanelVerileri = null;
+    let yoneticiMacGorunumu = 'hafta'; // Güncel haftayı göster; sonuçlananlar otomatik arşive ayrılır.
     // Resmî sonuç, operasyon maç kaydının durumundan BAĞIMSIZ bir Firebase ağacında tutulur.
     // Bu ekran yalnızca okur: 'AÇIK' kayıtları sessizce kapatmaz, sonuçları değiştirmez.
     function canliResmiMacSonucu(fiksturNo, kategori){
@@ -2900,17 +2901,39 @@ Devam edilsin mi?`)){
     }
     async function yoneticiMaciniHazirla(kategori,macId){
         const ref=db.ref(`maclar/${kategori}/${macId}`);
-        let s=await ref.once('value');
-        if(s.val())return s.val();
         const f=yoneticiFiksturMaclari.find(x=>x.id===macId && x.kategori===kategori);
-        if(!f)throw new Error('Bu maçın resmî fikstür bilgisi bulunamadı. Fikstür ekranından kontrol edin.');
-        await ensureMatchExists(kategori,f.hukOkul,f.muhOkul);
-        s=await ref.once('value');
-        if(!s.val())throw new Error('Maç kaydı oluşturulamadı.');
-        return s.val();
+        let s=await ref.once('value');
+        let mac=s.val();
+        if(!mac){
+            if(!f)throw new Error('Bu maçın resmî fikstür bilgisi bulunamadı. Fikstür ekranından kontrol edin.');
+            await ensureMatchExists(kategori,f.hukOkul,f.muhOkul);
+            s=await ref.once('value');
+            mac=s.val();
+        }
+        if(!mac)throw new Error('Maç kaydı oluşturulamadı.');
+        // Eski/eksik bir Firebase düğümünde okul alanları yoksa yalnızca boş alanları
+        // sabit fikstürden tamamla. Puan, süre, sonuç ve mevcut diğer alanlara dokunma.
+        if((!mac.hukOkul||!mac.muhOkul) && f?.hukOkul && f?.muhOkul){
+            const repaired=await ref.transaction(cur=>{
+                if(!cur)return cur;
+                const next={...cur};
+                if(!next.hukOkul)next.hukOkul=f.hukOkul;
+                if(!next.muhOkul)next.muhOkul=f.muhOkul;
+                if(!next.id)next.id=macId;
+                if(!next.kategori)next.kategori=kategori;
+                if(!next.etiket)next.etiket=macEtiketi(f.hukOkul,f.muhOkul);
+                if(!next.fiksturNo)next.fiksturNo=f.fiksturNo||null;
+                return next;
+            },undefined,false);
+            mac=repaired.snapshot?.val()||mac;
+        }
+        if(!mac.hukOkul||!mac.muhOkul)
+            throw new Error('Maç kaydında okul bilgisi eksik. Sabit fikstürden güvenli onarım yapılamadı; puan ve süre verileri korunuyor.');
+        return mac;
     }
     function renderYoneticiCanliPanel() {
         if(!adminYetkiliMi())return alert('Yönetici yetkisi gerekiyor.');
+        yoneticiMacGorunumu='hafta';
         yoneticiFiksturMaclari=[];
         yoneticiResmiFiksturDurumu=null;
         dinleyicileriTemizle();
@@ -2925,6 +2948,12 @@ Devam edilsin mi?`)){
                 <div class="kriter-card"><h3 style="margin-top:0;color:var(--text-main);">Maçlar · Canlı Puanlar ve 3/3 Jüri Durumu</h3>
                   <div class="sure-hint"><b>Tek ana işlem: Sonucu Kesinleştir.</b> Üç jüri ve öğrenci kadrosu tam olduğunda puanlardan resmî galibi hesaplar, maçı kapatır ve jüri ekranlarına sonucu bir kez duyurur. Eşitlikte tamamlanmış konuşma süreleri kullanılır. Kadro doğrulanmadıysa manuel denetim açılır. <b>Geriye dönük süre düzeltmesi galibi değiştirmez.</b> Hükmen, iptal ve yönetici kararı istisnai/gelişmiş işlemlerdedir.</div>
                    <div class="live-filter-bar no-print"><input id="liveMatchSearch" placeholder="Maç numarası veya okul ara..." oninput="yoneticiTabloFiltresiniGuncelle()" aria-label="Maç ara"><label><input id="iptalGoster" type="checkbox" style="width:auto;margin:0 5px 0 0;" onchange="yoneticiTabloFiltresiniGuncelle()">İptal edilenleri göster</label></div>
+                  <div class="btn-grid no-print" style="grid-template-columns:repeat(3,1fr);gap:7px;margin:8px 0;">
+                    <button id="liveViewBugun" class="btn" style="margin:0;padding:8px" onclick="yoneticiMacGorunumuSec('bugun')">Bugün</button>
+                    <button id="liveViewHafta" class="btn" style="margin:0;padding:8px" onclick="yoneticiMacGorunumuSec('hafta')">Bu Hafta</button>
+                    <button id="liveViewArsiv" class="btn" style="margin:0;padding:8px" onclick="yoneticiMacGorunumuSec('arsiv')">Arşiv</button>
+                  </div>
+                  <div class="sure-hint">Sonucu kesinleşen veya kapatılan maçlar otomatik olarak Arşiv’e ayrılır. Puanlar, süreler ve resmî sonuçlar silinmez.</div>
                   <div id="liveMatches" style="overflow-x:auto;">Yükleniyor...</div></div>
                 <div id="sureModalHost" class="no-print"></div>
                 <button class="btn no-print" style="background:#0f766e" onclick="yoneticiManuelMacEkleEkraniAc()">＋ Yeni / Manuel Maç Kaydet</button>
@@ -3587,6 +3616,29 @@ Devam edilsin mi?`)){
       finally{aktifSonucIslemleri.delete(lock);}
     }
 
+    function yoneticiMacArsivdeMi(row){
+        const m=row?.m||{};
+        return m.arsivlendi===true || !!row?.resmiSonuc ||
+            (m.durum==='kapali' && !!m.sonuc);
+    }
+
+    function yoneticiTarihAraligi(){
+        const now=new Date();
+        const key=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+        const monday=new Date(today);
+        monday.setDate(today.getDate()-((today.getDay()+6)%7));
+        const sunday=new Date(monday);
+        sunday.setDate(monday.getDate()+6);
+        return {today:key(today),monday:key(monday),sunday:key(sunday)};
+    }
+
+    function yoneticiMacGorunumuSec(gorunum){
+        if(!['bugun','hafta','arsiv'].includes(gorunum))return;
+        yoneticiMacGorunumu=gorunum;
+        if(yoneticiSonPanelVerileri)canliPaneliCiz(...yoneticiSonPanelVerileri);
+    }
+
     function canliPaneliCiz(skorlar,maclar,okullar) {
         const inferred={...maclar};
         for(const m of yoneticiFiksturMaclari){if(!inferred[m.id])inferred[m.id]={...m,_sanal:true};else inferred[m.id]={...m,...inferred[m.id],fiksturNo:inferred[m.id].fiksturNo||m.fiksturNo};}
@@ -3605,7 +3657,7 @@ Devam edilsin mi?`)){
             if(m.durum==='iptal')durumText='İptal edildi · fikstür kaydı korunur';
             else if(m.durum==='kapali'&&m.sonuc?.yontem==='cift_eleme')durumText='⛔ İKİ OKUL ELENDİ · Galip yok · Üst tur düzenlenmeli';
             else if(m.sonuc?.kazanan&&m.durum==='kapali')durumText=`${m.sonuc.yoneticiIstisnasi?'YÖNETİCİ ONAYLI · ':m.sonuc.yontem==='hukmen'?'HÜKMEN · ':''}Galip: ${m.sonuc.kazanan}`;
-            else if(resmiSonuc && m.durum!=='iptal')durumText=`✅ FİKSTÜRDE KESİNLEŞTİ · ${resmiSonuc.kazanan?'Galip: '+resmiSonuc.kazanan:'Galip yok'} · İşlem kaydı AÇIK (geçmiş kayıt; resmî galip korunuyor)`;
+            else if(resmiSonuc && m.durum!=='iptal')durumText=`✅ FİKSTÜRDE KESİNLEŞTİ · ${resmiSonuc.kazanan?'Galip: '+resmiSonuc.kazanan:'Galip yok'} · Arşivde`;
             else if(m.isPending || [m.hukOkul,m.muhOkul].some(n=>fiksturIstisnaNorm(n)==='boş'))durumText='⏳ RAKİP BEKLENİYOR · Maç ayrıldı, galip yok';
             else if(g.ready)durumText=huk!==muh?'Puanla galip belirlenebilir':(sure?.hukSaniye>0&&sure?.muhSaniye>0?(sure.hukSaniye!==sure.muhSaniye?'Süre üstünlüğü hazır':'Son savunma gerekli'):'BERABERLİK — süre girin');
             rows.push({id,m,...g,huk,muh,hamPuan,resmiSonuc,durumText});
@@ -3621,23 +3673,39 @@ Devam edilsin mi?`)){
             metrics.innerHTML=`<div class="admin-metric"><span>Resmî Fikstür Maçı</span><strong>${noListesi.length||'—'}</strong></div><div class="admin-metric"><span>Resmî Sonuç (Kesin / Bekleyen)</span><strong>${yoneticiResmiFiksturDurumu?kesinlesen+'/'+bekleyen:'Yükleniyor'}</strong></div><div class="admin-metric"><span>Jürisi Tam Maç</span><strong>${tamMac}</strong></div><div class="admin-metric"><span>Bu Cihaz Kuyruğu</span><strong>${q}</strong></div>`;
         }
         const div=document.getElementById('liveMatches');if(!div)return;
+        const aralik=yoneticiTarihAraligi();
+        const arsivdekiler=rows.filter(yoneticiMacArsivdeMi);
+        const aktifler=rows.filter(r=>!yoneticiMacArsivdeMi(r));
+        let gorunen=[];
+        if(yoneticiMacGorunumu==='arsiv')gorunen=arsivdekiler;
+        else if(yoneticiMacGorunumu==='bugun')gorunen=aktifler.filter(r=>{
+            const tarih=raporFiksturTarihAnahtari(r.m.fiksturTarih||r.m.tarih||'');
+            return !tarih||tarih===aralik.today;
+        });
+        else gorunen=aktifler.filter(r=>{
+            const tarih=raporFiksturTarihAnahtari(r.m.fiksturTarih||r.m.tarih||'');
+            // Tarihi geçip henüz sonuçlanmamış kayıtları kaybetme; güncel haftanın
+            // tüm maçları ve sonuç bekleyen eski kayıtlar bu görünümde kalır.
+            return !tarih||tarih<=aralik.sunday;
+        });
+
         const search=skorEslesmeAnahtari(document.getElementById('liveMatchSearch')?.value||'');
         const iptalGoster=document.getElementById('iptalGoster')?.checked||false;
-        const bulunan=rows.filter(r=>(iptalGoster||r.m.durum!=='iptal')&&(!search||skorEslesmeAnahtari((r.m.fiksturNo||'')+' '+(r.m.etiket||macEtiketi(r.m.hukOkul,r.m.muhOkul))).includes(search)));
+        const bulunan=gorunen.filter(r=>(iptalGoster||r.m.durum!=='iptal')&&(!search||skorEslesmeAnahtari((r.m.fiksturNo||'')+' '+(r.m.etiket||macEtiketi(r.m.hukOkul,r.m.muhOkul))).includes(search)));
+        const but=(text,cb,bg,disabled=false)=>`<button class="btn" style="padding:7px;margin:3px 0;background:${bg}" ${disabled?'disabled':''} onclick="${cb}">${text}</button>`;
         let html='<table class="tutanak-table"><tr><th>Maç</th><th>Durum</th><th>3/3 Tam</th><th>Kayıtlı Puan (H / M)</th><th>Süre (H / M)</th><th>Sonuç</th><th>Yönetici İşlemleri</th></tr>';
         bulunan.forEach(r=>{
             const kap=r.m.durum==='kapali',iptal=r.m.durum==='iptal',sure=r.m.sureEsitlik||(()=>{
                 const o=otomatikSureleriDerle(r.m);
                 return o.sayi?{hukSaniye:o.toplam.huk,muhSaniye:o.toplam.muh,kaynak:'otomatik'}:null;
             })();
-            const state=r.resmiSonuc && !kap && !iptal?'Fikstür kesinleşmiş · eski işlem kaydı açık':
+            const state=r.resmiSonuc && !kap && !iptal?'Fikstür kesinleşmiş · otomatik arşivde':
                 r.m.sonuc?.senkronDurum==='tamam'?'Eşitlendi':(kap&&r.m.sonuc?.senkronDurum==='fikstur_eslesme_gerekli'?'Fikstür eşleştirmesi gerekli':kap?'Senkron bekliyor':iptal?'İptal':'Açık');
             const tip=kap?'KAPALI':iptal?'İPTAL':r.resmiSonuc?'RESMÎ FİKSTÜR KESİN':'AÇIK';
             const kayitliSonuc=r.m.sonuc||{};
             const kesinPuan=kap&&Number.isFinite(kayitliSonuc.puanHuk)&&Number.isFinite(kayitliSonuc.puanMuh);
             const puan=kesinPuan?`${kayitliSonuc.puanHuk} / ${kayitliSonuc.puanMuh}`:(kap&&['hukmen','yonetici_karari','cift_eleme'].includes(kayitliSonuc.yontem)?'— / —':`${r.hamPuan.huk} / ${r.hamPuan.muh}`);
             const puanAciklamasi=kesinPuan?'Resmî sonuç':r.hamPuan.sayi?`${r.hamPuan.sayi} jüri kaydı · ${r.ready?'3/3 tamam':'kısmi toplam'}`:'Henüz jüri puanı yok';
-            const but=(text,cb,bg,disabled=false)=>`<button class="btn" style="padding:7px;margin:3px 0;background:${bg}" ${disabled?'disabled':''} onclick="${cb}">${text}</button>`;
             const f=`'${secimler.kategori}','${r.id}'`;
             let actions='';
             if(r.m.isPending || [r.m.hukOkul,r.m.muhOkul].some(n=>fiksturIstisnaNorm(n)==='boş')){
@@ -3653,7 +3721,7 @@ Devam edilsin mi?`)){
                     istisnalar+=but('✏ Resmî Puanı Manuel Onayla',`yoneticiManuelSonucEkraniAc(${f})`,'#0f766e');
                     istisnalar+=but('⚖ Hükmen Sonuç',`macHukmenKapat(${f})`,'#a16207');
                     istisnalar+=but('⛔ İki Okul da Gelmedi',`macCiftElemeIleKapat(${f})`,'#9f1239');
-                    istisnalar+=but('🛡 Gerekçeli Yönetici Kararı',`yoneticiKarariylaKapat(${f})`,'#6d28d9');
+                    istisnalar+=but('🛡 Gerekçeli Yönetici Kararı',`yoneticiKarariylaKapat(${f})`,'#6d28d6');
                     istisnalar+=but('✕ Maçı İptal Et',`macIptaliniDegistir(${f},true)`,'#475569');
                     if(!r.m._sanal)istisnalar+=but('🗑 Maç Kaydını Sil',`yoneticiMacKaydiniSil(${f})`,'#7f1d1d');
                 }else{
@@ -3665,7 +3733,28 @@ Devam edilsin mi?`)){
             const idPrefix=r.m.fiksturNo?'#'+r.m.fiksturNo+' · ':'';
             html+=`<tr><td>${htmlEscape(idPrefix+(r.m.etiket||macEtiketi(r.m.hukOkul,r.m.muhOkul)))}</td><td class="${kap||iptal?'jury-missing':'jury-ok'}">${tip}<div style="font-size:10px">${state}</div></td><td class="${r.ready?'jury-ok':'jury-missing'}">${r.total?`${r.tam}/${r.total}`:`${r.kayitliTam}/${r.kayitliOgrenci}`}${!r.total&&r.kayitliOgrenci?'<div style="font-size:10px;color:#fbbf24">Puan kayıtlarından · kadro doğrulanmadı</div>':''}${r.eksik?`<div style="font-size:10px">${htmlEscape(r.eksikRoller.join(', '))}</div>`:''}</td><td class="sure-skor">${puan}<div style="font-size:10px;color:var(--text-muted);white-space:nowrap">${htmlEscape(puanAciklamasi)}</div></td><td class="sure-skor">${sure?.hukSaniye!=null?sureyiMetneDonustur(sure.hukSaniye):'—'} / ${sure?.muhSaniye!=null?sureyiMetneDonustur(sure.muhSaniye):'—'}${sure?.kaynak==='otomatik'?'<div style="font-size:10px;color:#7dd3fc">Ortak sayaçlardan</div>':''}</td><td style="font-size:11px">${htmlEscape(r.durumText)}</td><td class="live-actions" style="min-width:145px">${actions}</td></tr>`;
         });
-        div.innerHTML=html+(bulunan.length?'':'<tr><td colspan="7">Arama kriterlerine uygun maç bulunamadı.</td></tr>')+'</table>';
+        div.innerHTML=html+(bulunan.length?'':'<tr><td colspan="7">'+
+            (yoneticiMacGorunumu==='arsiv'?'Henüz arşivlenmiş maç bulunmuyor.':yoneticiMacGorunumu==='bugun'?'Bugün için açık maç bulunmuyor. Bu haftayı seçerek diğer maçları görebilirsiniz.':'Bu haftada sonuç bekleyen maç bulunmuyor.')+
+            '</td></tr>')+'</table>';
+
+        const archiveCount=arsivdekiler.length;
+        const todayCount=aktifler.filter(r=>{
+            const t=raporFiksturTarihAnahtari(r.m.fiksturTarih||r.m.tarih||'');
+            return !t||t===aralik.today;
+        }).length;
+        const weekCount=aktifler.filter(r=>{
+            const t=raporFiksturTarihAnahtari(r.m.fiksturTarih||r.m.tarih||'');
+            return !t||t<=aralik.sunday;
+        }).length;
+        const viewConfig=[
+            ['bugun','liveViewBugun',`Bugün (${todayCount})`],
+            ['hafta','liveViewHafta',`Bu Hafta (${weekCount})`],
+            ['arsiv','liveViewArsiv',`Arşiv (${archiveCount})`]
+        ];
+        for(const [view,id,label] of viewConfig){
+            const b=document.getElementById(id);
+            if(b){b.textContent=label;b.style.background=yoneticiMacGorunumu===view?'#0f766e':'#475569';b.style.opacity=yoneticiMacGorunumu===view?'1':'0.88';}
+        }
     }
 
     async function macHukmenKapat(kategori,macId){
