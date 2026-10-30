@@ -3830,6 +3830,10 @@ Devam edilsin mi?`)){
             const idPrefix=r.m.fiksturNo?'#'+r.m.fiksturNo+' · ':'';
             html+=`<tr><td>${htmlEscape(idPrefix+(r.m.etiket||macEtiketi(r.m.hukOkul,r.m.muhOkul)))}</td><td class="${kap||iptal?'jury-missing':'jury-ok'}">${tip}<div style="font-size:10px">${state}</div></td><td class="${r.ready?'jury-ok':'jury-missing'}">${r.total?`${r.tam}/${r.total}`:`${r.kayitliTam}/${r.kayitliOgrenci}`}${!r.total&&r.kayitliOgrenci?'<div style="font-size:10px;color:#fbbf24">Puan kayıtlarından · kadro doğrulanmadı</div>':''}${r.eksik?`<div style="font-size:10px">${htmlEscape(r.eksikRoller.join(', '))}</div>`:''}</td><td class="sure-skor">${puan}<div style="font-size:10px;color:var(--text-muted);white-space:nowrap">${htmlEscape(puanAciklamasi)}</div></td><td class="sure-skor">${sure?.hukSaniye!=null?sureyiMetneDonustur(sure.hukSaniye):'—'} / ${sure?.muhSaniye!=null?sureyiMetneDonustur(sure.muhSaniye):'—'}${sure?.kaynak==='otomatik'?'<div style="font-size:10px;color:#7dd3fc">Ortak sayaçlardan</div>':''}</td><td style="font-size:11px">${htmlEscape(r.durumText)}</td><td class="live-actions" style="min-width:145px">${actions}</td></tr>`;
         });
+        const weekCount=aktifler.filter(r=>{
+            const t=raporFiksturTarihAnahtari(r.m.fiksturTarih||r.m.tarih||'');
+            return !t?yoneticiMacHaftaOffset===0:(t>=aralik.monday&&t<=aralik.sunday);
+        }).length;
         let haftaGezinti='';
         if(yoneticiMacGorunumu==='hafta'){
             const maxOffset=yoneticiMacMaksimumHaftaOffseti(rows);
@@ -3854,10 +3858,6 @@ Devam edilsin mi?`)){
         const todayCount=aktifler.filter(r=>{
             const t=raporFiksturTarihAnahtari(r.m.fiksturTarih||r.m.tarih||'');
             return !t||t===aralik.today;
-        }).length;
-        const weekCount=aktifler.filter(r=>{
-            const t=raporFiksturTarihAnahtari(r.m.fiksturTarih||r.m.tarih||'');
-            return !t?yoneticiMacHaftaOffset===0:(t>=aralik.monday&&t<=aralik.sunday);
         }).length;
         const viewConfig=[
             ['bugun','liveViewBugun',`Bugün (${todayCount})`],
