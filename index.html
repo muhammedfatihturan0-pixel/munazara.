@@ -290,7 +290,7 @@
 </div>
 
 <script>
-    const APP_VERSION = '3.31 · Firebase Puan Doğrulama ve Jüri Uyarısı';
+    const APP_VERSION = '3.32 · Aktif Maç Excel Dışa Aktarımı';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -2669,7 +2669,7 @@ Devam edilsin mi?`)){
                     <button class="btn" style="background:var(--primary);border:none;margin:0;" onclick="raporTakimYazdir()">Seçili Gün · Tutanak / PDF</button>
                     <button class="btn" style="background:#475569;margin:0;" onclick="renderYoneticiMenu()">Kapat</button>
                 </div>
-                <p class="report-print-note no-print">Tutanak, seçilen tarihteki karşılaşmaları ve öğrenci puan ayrıntılarını içerir. PDF çıktısı yalnızca seçili gün için hazırlanır. Genel rapor için “Tüm Günler” seçeneği kullanılabilir. Jüri isimleri önce kaydedilmiş puanlardan, bulunmuyorsa Firebase fikstür görevlendirmelerinden alınır.</p>
+                <p class="report-print-note no-print">Tutanak, seçilen tarihteki karşılaşmaları ve öğrenci puan ayrıntılarını içerir. PDF çıktısı yalnızca seçili gün için hazırlanır. Excel dışa aktarımında ise yalnızca henüz kesinleşmemiş maçlar yer alır; bitmiş maçlar ve bunlara ait puan, süre, jüri ve taslak kayıtları hiçbir sayfaya eklenmez. Jüri isimleri önce kaydedilmiş puanlardan, bulunmuyorsa Firebase fikstür görevlendirmelerinden alınır.</p>
                 <div class="no-print" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:20px;"><label id="gunFiltreLabel" for="gunFiltre" style="font-size:13px;font-weight:700;white-space:nowrap;">Tutanak günü:</label><select id="gunFiltre" style="margin:0;max-width:500px;flex:1;" onchange="tutanakTablosuDoldur()"><option value="">Günler yükleniyor…</option></select></div>
                 <div id="rapor-tablosu" style="overflow-x:auto;">Veriler derleniyor...</div>
                 <section id="raporKompaktYazdir" class="print-only" aria-label="Kompakt puan tutanağı"></section>
@@ -3087,41 +3087,121 @@ Devam edilsin mi?`)){
     function raporuExcelIndir() {
         if(!adminYetkiliMi())return alert('Rapor yalnızca yönetici tarafından indirilebilir.');
         if(!sonRaporVerisi)return alert('Excel için rapor verileri henüz yüklenmedi.');
-        const puanRows=sonRaporVerisi.kayitlar.map(v=>{const mid=kayitMacId(v); const m=sonRaporVerisi.maclarMap?.[mid]||{}; const satir={'Kategori':sonRaporVerisi.kategori,'Maç ID':mid,'Maç':kayitMacEtiketi(v),'Maç Durumu':m.durum||'','Taraf':v.secim?.taraf||'','Okul':v.secim?.okul||'','Öğrenci':(v.secim?.ogr||'').split(' (')[0],'Jüri':v.secim?.juri||'','Jüri Adı':v.secim?.juriAd||''}; krit.forEach((k,i)=>satir[`${i+1}. ${k.t}`]=Number(v.puanlar?.[i]??v.puanlar?.[String(i)]??0)); satir['Toplam']=puanToplami(v); satir['Son Güncelleme']=v.updatedAt&&typeof v.updatedAt==='number'?new Date(v.updatedAt).toLocaleString('tr-TR'):''; return satir;});
-        const juriRows=sonRaporVerisi.juriRows.map(x=>{const eksikler=BEKLENEN_JURILER.filter(j=>!x.juriler.has(j)); return {'Maç ID':x.macId,'Maç':x.mac,'Okul':x.okul,'Öğrenci':x.ogrenci,'Jüri Sayısı':x.juriler.size,'Tamamlayan Jüriler':[...x.juriler].join(', '),'Eksik Jüriler':eksikler.join(', '),'Ortalama':x.sayac?Number((x.toplam/x.sayac).toFixed(1)):''};});
-        const okulRows=sonRaporVerisi.siraliOkullar.map((x,i)=>({'Sıra':i+1,'Okul':x.isim,'Toplam Puan':x.toplam}));
-        const mvpRows=sonRaporVerisi.siraliList.map((x,i)=>({'Sıra':i+1,'Öğrenci':x.isim.split(' (')[0],'Okul':(x.isim.match(/\((.*)\)$/)||[])[1]||'','Ortalama':x.ortalama,'Jüri Kaydı':x.juriSayisi}));
+
+        const kategori=sonRaporVerisi.kategori;
+        const resmi=sonRaporVerisi.resmiFikstur||{};
+        const tumMacRaporlari=raporTakimVerisiniDerle();
+
+        // Excel, okullara gönderilecek aktif iş listesidir. Kesinleşmiş veya kapatılmış
+        // maçlar hiçbir sayfaya alınmaz. Kontrol hem maç kaydını hem resmî fikstürü okur.
+        function macTamamlandiMi(id, mac={}, raporSatiri=null){
+            const no=Number(mac?.fiksturNo||raporSatiri?.m?.fiksturNo||0);
+            const finalKaydi=no>0?resmi.finalizedMatches?.[no]:null;
+            const elenmeKaydi=no>0?resmi.noWinnerMatches?.[no]:null;
+            const finalKategoriUygun=!finalKaydi?.kategori||finalKaydi.kategori===kategori;
+            const finalMacUygun=!finalKaydi?.macId||finalKaydi.macId===id;
+            const elenmeKategoriUygun=!elenmeKaydi?.kategori||elenmeKaydi.kategori===kategori;
+            const elenmeMacUygun=!elenmeKaydi?.macId||elenmeKaydi.macId===id;
+            return String(mac?.durum||'').toLocaleLowerCase('tr-TR')==='kapali'
+                || mac?.sonuc?.yontem==='cift_eleme'
+                || !!raporSatiri?.sonucVar
+                || !!(finalKaydi&&finalKategoriUygun&&finalMacUygun)
+                || !!(elenmeKaydi&&elenmeKategoriUygun&&elenmeMacUygun);
+        }
+
+        const bitmisMacIdleri=new Set(tumMacRaporlari
+            .filter(r=>macTamamlandiMi(r.id,r.m,r))
+            .map(r=>r.id));
+        const aktifMacRaporlari=tumMacRaporlari.filter(r=>!bitmisMacIdleri.has(r.id));
+        const aktifMacIdleri=new Set(aktifMacRaporlari.map(r=>r.id));
+        const aktifKayitlar=(sonRaporVerisi.kayitlar||[])
+            .filter(v=>aktifMacIdleri.has(kayitMacId(v)));
+
+        const puanRows=aktifKayitlar.map(v=>{
+            const mid=kayitMacId(v);
+            const m=sonRaporVerisi.maclarMap?.[mid]||{};
+            const satir={
+                'Kategori':kategori,'Maç ID':mid,'Maç':kayitMacEtiketi(v),'Maç Durumu':m.durum||'Açık',
+                'Taraf':v.secim?.taraf||'','Okul':v.secim?.okul||'',
+                'Öğrenci':(v.secim?.ogr||'').split(' (')[0],'Jüri':v.secim?.juri||'',
+                'Jüri Adı':v.secim?.juriAd||''
+            };
+            krit.forEach((k,i)=>satir[`${i+1}. ${k.t}`]=Number(v.puanlar?.[i]??v.puanlar?.[String(i)]??0));
+            satir['Toplam']=puanToplami(v);
+            satir['Son Güncelleme']=v.updatedAt&&typeof v.updatedAt==='number'?new Date(v.updatedAt).toLocaleString('tr-TR'):'';
+            return satir;
+        });
+
+        const juriRows=(sonRaporVerisi.juriRows||[])
+            .filter(x=>aktifMacIdleri.has(x.macId))
+            .map(x=>{
+                const eksikler=BEKLENEN_JURILER.filter(j=>!x.juriler.has(j));
+                return {'Maç ID':x.macId,'Maç':x.mac,'Okul':x.okul,'Öğrenci':x.ogrenci,
+                    'Jüri Sayısı':x.juriler.size,'Tamamlayan Jüriler':[...x.juriler].join(', '),
+                    'Eksik Jüriler':eksikler.join(', '),'Ortalama':x.sayac?Number((x.toplam/x.sayac).toFixed(1)):''};
+            });
+
+        // Okul toplamları ve MVP ortalamaları yalnızca henüz tamamlanmamış maçlardan hesaplanır.
+        const aktifOgrenciPuanlari={},aktifOkulPuanlari={};
+        for(const v of aktifKayitlar){
+            const toplam=puanToplami(v),secim=v.secim||{};
+            const ogrKisa=(secim.ogr||'').split(' (')[0];
+            if(secim.ogr){
+                const temizIsim=ogrKisa+' ('+(secim.okul||'-')+')';
+                if(!aktifOgrenciPuanlari[temizIsim])aktifOgrenciPuanlari[temizIsim]={skor:0,sayac:0};
+                aktifOgrenciPuanlari[temizIsim].skor+=toplam;
+                aktifOgrenciPuanlari[temizIsim].sayac++;
+            }
+            if(secim.okul){
+                if(!aktifOkulPuanlari[secim.okul])aktifOkulPuanlari[secim.okul]=0;
+                aktifOkulPuanlari[secim.okul]+=toplam;
+            }
+        }
+        const okulRows=Object.keys(aktifOkulPuanlari)
+            .map(isim=>({isim,toplam:aktifOkulPuanlari[isim]}))
+            .sort((a,b)=>b.toplam-a.toplam)
+            .map((x,i)=>({'Sıra':i+1,'Okul':x.isim,'Toplam Puan':x.toplam}));
+        const mvpRows=Object.keys(aktifOgrenciPuanlari)
+            .map(isim=>({isim,ortalama:Number((aktifOgrenciPuanlari[isim].skor/aktifOgrenciPuanlari[isim].sayac).toFixed(1)),juriSayisi:aktifOgrenciPuanlari[isim].sayac}))
+            .sort((a,b)=>b.ortalama-a.ortalama)
+            .map((x,i)=>({'Sıra':i+1,'Öğrenci':x.isim.split(' (')[0],'Okul':(x.isim.match(/\((.*)\)$/)||[])[1]||'','Ortalama':x.ortalama,'Jüri Kaydı':x.juriSayisi}));
+
         const sureRows=[];
         Object.entries(sonRaporVerisi.maclarMap||{}).forEach(([id,m])=>{
+            if(!aktifMacIdleri.has(id)||macTamamlandiMi(id,m))return;
             for(const taraf of ['huk','muh'])for(const x of (m.sureEsitlik?.ogrenciler?.[taraf]||[])){
-                sureRows.push({'Kategori':sonRaporVerisi.kategori,'Maç ID':id,'Maç':m.etiket||'','Okul':taraf==='huk'?m.hukOkul:m.muhOkul,
-                    'Taraf':taraf==='huk'?'HÜKÜMET':'MUHALEFET','Öğrenci':x.ad,'Süre (Saniye)':x.saniye,'Süre (DD:SS)':sureyiMetneDonustur(x.saniye),'Kayıt Türü':'Onaylı resmî süre'});
+                sureRows.push({'Kategori':kategori,'Maç ID':id,'Maç':m.etiket||'',
+                    'Okul':taraf==='huk'?m.hukOkul:m.muhOkul,'Taraf':taraf==='huk'?'HÜKÜMET':'MUHALEFET',
+                    'Öğrenci':x.ad,'Süre (Saniye)':x.saniye,'Süre (DD:SS)':sureyiMetneDonustur(x.saniye),
+                    'Kayıt Türü':'Onaylı resmî süre'});
             }
             Object.values(m.konusmaSayaclari||{}).forEach(v=>{
                 if(!v?.ogrenci)return;
                 const s=ortakSureKalan(v);
                 if(!s?.bitti)return;
-                sureRows.push({'Kategori':sonRaporVerisi.kategori,'Maç ID':id,'Maç':m.etiket||'','Okul':v.okul||'',
-                    'Taraf':v.taraf||'','Öğrenci':v.ogrenci,'Süre (Saniye)':s.gecen,
-                    'Süre (DD:SS)':sureyiMetneDonustur(s.gecen),'Kayıt Türü':'Jüri ortak sayacı (resmî onay bekleyebilir)'});
+                sureRows.push({'Kategori':kategori,'Maç ID':id,'Maç':m.etiket||'',
+                    'Okul':v.okul||'','Taraf':v.taraf||'','Öğrenci':v.ogrenci,
+                    'Süre (Saniye)':s.gecen,'Süre (DD:SS)':sureyiMetneDonustur(s.gecen),
+                    'Kayıt Türü':'Jüri ortak sayacı (resmî onay bekleyebilir)'});
             });
         });
-        const sureToplamRows=Object.entries(sonRaporVerisi.maclarMap||{}).map(([id,m])=>{
-            const o=otomatikSureleriDerle(m),v=m.sureEsitlik;
-            return {'Maç ID':id,'Maç':m.etiket||'','Hükümet Okulu':m.hukOkul,
-                'Muhalefet Okulu':m.muhOkul,'Hükümet Toplam Saniye':v?.hukSaniye??(o.ogrenciler.huk.length?o.toplam.huk:''),
-                'Muhalefet Toplam Saniye':v?.muhSaniye??(o.ogrenciler.muh.length?o.toplam.muh:''),
-                'Hükümet Öğrenci Sayısı':v?.ogrenciler?.huk?.length??o.ogrenciler.huk.length,
-                'Muhalefet Öğrenci Sayısı':v?.ogrenciler?.muh?.length??o.ogrenciler.muh.length,
-                'Kaynak':v?.kaynak||'Ortak sayaçlardan'};
-        });
-        const kapananRows=Object.entries(sonRaporVerisi.maclarMap||{}).filter(([id,m])=>m.durum==='kapali'&&(m.sonuc?.kazanan||m.sonuc?.yontem==='cift_eleme')).map(([id,m])=>({
-            'Maç ID':id,'Maç':m.etiket||'', 'Kazanan':m.sonuc.kazanan||'GALİP YOK — İKİ OKUL ELENDİ','Yöntem':m.sonuc.yontem==='hukmen'?'HÜKMEN':m.sonuc.yontem==='yonetici_karari'?'YÖNETİCİ KARARI':m.sonuc.yontem==='yonetici_onayli_puan'?'YÖNETİCİ ONAYLI SAYISAL SONUÇ':m.sonuc.yontem==='cift_eleme'?'ÇİFT ELEME':m.sonuc.yontem,
-            'Gerekçe':m.sonuc.gerekce||'','Resmî Puan Hükümet':m.sonuc.puanHuk??'','Resmî Puan Muhalefet':m.sonuc.puanMuh??'','Senkron Durumu':m.sonuc.senkronDurum||'', 'Gelmeyen / Mağlup':m.sonuc.elenenOkullar?.join(' / ')||m.sonuc.maglup||''
-        }));
-        const takimRows=raporTakimVerisiniDerle().map(r=>({
-            'Kategori':sonRaporVerisi.kategori,'Maç No':r.m.fiksturNo||'',
-            'Tarih':r.m.fiksturTarih||'','Hükümet Okulu':r.m.hukOkul,'Muhalefet Okulu':r.m.muhOkul,
+
+        const sureToplamRows=Object.entries(sonRaporVerisi.maclarMap||{})
+            .filter(([id,m])=>aktifMacIdleri.has(id)&&!macTamamlandiMi(id,m))
+            .map(([id,m])=>{
+                const o=otomatikSureleriDerle(m),v=m.sureEsitlik;
+                return {'Maç ID':id,'Maç':m.etiket||'','Hükümet Okulu':m.hukOkul,
+                    'Muhalefet Okulu':m.muhOkul,
+                    'Hükümet Toplam Saniye':v?.hukSaniye??(o.ogrenciler.huk.length?o.toplam.huk:''),
+                    'Muhalefet Toplam Saniye':v?.muhSaniye??(o.ogrenciler.muh.length?o.toplam.muh:''),
+                    'Hükümet Öğrenci Sayısı':v?.ogrenciler?.huk?.length??o.ogrenciler.huk.length,
+                    'Muhalefet Öğrenci Sayısı':v?.ogrenciler?.muh?.length??o.ogrenciler.muh.length,
+                    'Kaynak':v?.kaynak||'Ortak sayaçlardan'};
+            });
+
+        const takimRows=aktifMacRaporlari.map(r=>({
+            'Kategori':kategori,'Maç No':r.m.fiksturNo||'','Tarih':r.m.fiksturTarih||'',
+            'Hükümet Okulu':r.m.hukOkul,'Muhalefet Okulu':r.m.muhOkul,
             '1. Jüri Hükümet':r.roles[0].hukKayit?r.roles[0].huk:'',
             '1. Jüri Muhalefet':r.roles[0].muhKayit?r.roles[0].muh:'',
             '2. Jüri Hükümet':r.roles[1].hukKayit?r.roles[1].huk:'',
@@ -3132,27 +3212,40 @@ Devam edilsin mi?`)){
             'Hükümet Süre':r.sureH==null?'':sureyiMetneDonustur(r.sureH),
             'Muhalefet Süre':r.sureM==null?'':sureyiMetneDonustur(r.sureM),
             '1. Jüri Adı':r.names[0].name,'2. Jüri Adı':r.names[1].name,'3. Jüri Adı':r.names[2].name,
-            'Galip':r.kazanan||'','Durum':r.durum
+            'Galip':'','Durum':r.durum
         }));
+
+        const taslakRows=(sonRaporVerisi.taslakAnalizi?.kayitlar||[])
+            .filter(x=>aktifMacIdleri.has(x.macId)&&!bitmisMacIdleri.has(x.macId))
+            .map(x=>{
+                const row={'Maç ID':x.macId,'Okul':x.okul,'Öğrenci':x.ogrenci,
+                    'Jüri':x.juri,'Jüri Adı':x.juriAd,'Dolu Kriter':x.dolu};
+                krit.forEach((k,i)=>row[(i+1)+'. '+k.t]=Number(x.ayrinti[i]||0));
+                row['Eksik Kriterler']=x.eksikKriterler;
+                row['Taslak Puanı (Boşlar 0)']=x.toplam;
+                row['Durum']='Taslak — resmî sonuca dahil değil';
+                return row;
+            });
+
         const wb=XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(takimRows.length?takimRows:[{'Bilgi':'Henüz maç kaydı bulunamadı.'}]),'Takim Sonuclari');
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(puanRows.length?puanRows:[{'Bilgi':'Henüz öğrenci puanı bulunamadı.'}]),'Puanlar');
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(juriRows),'Juri Durumu');
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(okulRows),'Okul Ozeti');
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mvpRows),'MVP');
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sureRows.length?sureRows:[{'Bilgi':'Henüz öğrenci bazlı süre kaydı yok.'}]),'Ogrenci Sureleri');
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sureToplamRows.length?sureToplamRows:[{'Bilgi':'Henüz maç yok.'}]),'Sure Toplamlari');
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(kapananRows.length?kapananRows:[{'Bilgi':'Henüz kesinleşen sonuç yok.'}]),'Kesin Sonuclar');
-        const taslakRows=(sonRaporVerisi.taslakAnalizi?.kayitlar||[]).map(x=>{
-            const row={'Maç ID':x.macId,'Okul':x.okul,'Öğrenci':x.ogrenci,'Jüri':x.juri,'Jüri Adı':x.juriAd,'Dolu Kriter':x.dolu};
-            krit.forEach((k,i)=>row[(i+1)+'. '+k.t]=x.ayrinti[i]||0);
-            row['Eksik Kriterler']=x.eksikKriterler;
-            row['Taslak Puanı (Boşlar 0)']=x.toplam;
-            row['Durum']='Taslak — resmî sonuca dahil değil';
-            return row;
-        });
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(taslakRows.length?taslakRows:[{'Bilgi':'Eksik taslak puan bulunamadı.'}]),'Taslak Simulasyonu');
-        const tarih=new Date().toISOString().slice(0,10); XLSX.writeFile(wb,`Munazara_Sonuclari_${sonRaporVerisi.kategori}_${tarih}.xlsx`);
+        const sayfaEkle=(ad,satirlar,bilgi)=>{
+            const ws=XLSX.utils.json_to_sheet(satirlar.length?satirlar:[{'Bilgi':bilgi}]);
+            if(ws['!ref'])ws['!autofilter']={ref:ws['!ref']};
+            XLSX.utils.book_append_sheet(wb,ws,ad);
+        };
+        sayfaEkle('Takim Sonuclari',takimRows,'Kesinleşmemiş maç bulunamadı.');
+        sayfaEkle('Puanlar',puanRows,'Aktif maçlara ait öğrenci puanı bulunamadı.');
+        sayfaEkle('Juri Durumu',juriRows,'Aktif maçlarda jüri puan kaydı bulunamadı.');
+        sayfaEkle('Okul Ozeti',okulRows,'Aktif maçlara ait okul puanı bulunamadı.');
+        sayfaEkle('MVP',mvpRows,'Aktif maçlara ait öğrenci puanı bulunamadı.');
+        sayfaEkle('Ogrenci Sureleri',sureRows,'Aktif maçlarda öğrenci süre kaydı bulunamadı.');
+        sayfaEkle('Sure Toplamlari',sureToplamRows,'Kesinleşmemiş maçlarda süre kaydı bulunamadı.');
+        sayfaEkle('Taslak Simulasyonu',taslakRows,'Aktif maçlara ait eksik taslak puan bulunamadı.');
+
+        const tarih=new Date().toISOString().slice(0,10);
+        const dosyaAdi=`Munazara_Aktif_Maclar_${kategori}_${tarih}.xlsx`;
+        XLSX.writeFile(wb,dosyaAdi);
+        showToast(`Excel hazır: ${aktifMacRaporlari.length} açık maç · ${bitmisMacIdleri.size} bitmiş maç dışarıda bırakıldı.`);
     }
 
     // --- YÖNETİCİ CANLI PANELİ ---
