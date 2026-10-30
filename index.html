@@ -2822,8 +2822,8 @@ Devam edilsin mi?`)){
             return;
         }
         let html='<h3 style="margin-top:0;color:var(--text-main)">🧮 Eksik Taslak Puan Analizi</h3><div class="puanlama-bilgi">Boş veya geçersiz kriterler bu simülasyonda <b>0 puan</b> kabul edilir. Taslaklar yalnızca aşağıdaki varsayımsal hesaba eklenir; resmî puanlara, kesinleşmiş galibe ve turnuva ağacına yazılmaz.</div>';
-        html+='<div style="overflow-x:auto"><table class="tutanak-table"><tr><th>Maç</th><th>Okul</th><th>Öğrenci</th><th>Jüri</th><th>Dolu Kriter</th><th>Eksik Kriter</th><th>Taslak Puanı</th></tr>';
-        for(const x of analiz.kayitlar)html+='<tr><td>'+htmlEscape(x.macId)+'</td><td>'+htmlEscape(x.okul)+'</td><td>'+htmlEscape(x.ogrenci)+'</td><td>'+htmlEscape(x.juriAd)+' ('+htmlEscape(x.juri)+')</td><td>'+x.dolu+'/13</td><td>'+htmlEscape(x.eksikKriterler)+'</td><td><b>'+x.toplam+'</b></td></tr>';
+        html+='<div style="overflow-x:auto"><table class="tutanak-table"><tr><th>Maç</th><th>Okul</th><th>Öğrenci</th><th>Jüri</th><th>Dolu</th>'+krit.map((k,i)=>'<th>'+ (i+1) +'</th>').join('')+'<th>Eksik Kriter</th><th>Taslak Puanı</th></tr>';
+        for(const x of analiz.kayitlar)html+='<tr><td>'+htmlEscape(x.macId)+'</td><td>'+htmlEscape(x.okul)+'</td><td>'+htmlEscape(x.ogrenci)+'</td><td>'+htmlEscape(x.juriAd)+' ('+htmlEscape(x.juri)+')</td><td>'+x.dolu+'/13</td>'+x.ayrinti.map(n=>'<td>'+n+'</td>').join('')+'<td>'+htmlEscape(x.eksikKriterler)+'</td><td><b>'+x.toplam+'</b></td></tr>';
         html+='</table></div>';
         html+='<h4 style="color:var(--text-main);margin:18px 0 8px">Taslaklar eklenirse varsayımsal maç puanları</h4><div style="overflow-x:auto"><table class="tutanak-table"><tr><th>Maç</th><th>Resmî ham H/M</th><th>Taslak H/M</th><th>Varsayımsal toplam H/M</th><th>Varsayımsal üstün</th></tr>';
         for(const x of analiz.maclar)html+='<tr><td>'+htmlEscape(x.mac)+'</td><td>'+x.resmiH+' / '+x.resmiM+'</td><td>'+x.taslakH+' / '+x.taslakM+'</td><td><b>'+x.toplamH+' / '+x.toplamM+'</b></td><td><b>'+htmlEscape(x.varsayimKazanan)+'</b></td></tr>';
@@ -3139,11 +3139,14 @@ Devam edilsin mi?`)){
         XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sureRows.length?sureRows:[{'Bilgi':'Henüz öğrenci bazlı süre kaydı yok.'}]),'Ogrenci Sureleri');
         XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sureToplamRows.length?sureToplamRows:[{'Bilgi':'Henüz maç yok.'}]),'Sure Toplamlari');
         XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(kapananRows.length?kapananRows:[{'Bilgi':'Henüz kesinleşen sonuç yok.'}]),'Kesin Sonuclar');
-        const taslakRows=(sonRaporVerisi.taslakAnalizi?.kayitlar||[]).map(x=>({
-            'Maç ID':x.macId,'Okul':x.okul,'Öğrenci':x.ogrenci,'Jüri':x.juri,'Jüri Adı':x.juriAd,
-            'Dolu Kriter':x.dolu,'Eksik Kriterler':x.eksikKriterler,'Taslak Puanı (Boşlar 0)':x.toplam,
-            'Durum':'Taslak — resmî sonuca dahil değil'
-        }));
+        const taslakRows=(sonRaporVerisi.taslakAnalizi?.kayitlar||[]).map(x=>{
+            const row={'Maç ID':x.macId,'Okul':x.okul,'Öğrenci':x.ogrenci,'Jüri':x.juri,'Jüri Adı':x.juriAd,'Dolu Kriter':x.dolu};
+            krit.forEach((k,i)=>row[(i+1)+'. '+k.t]=x.ayrinti[i]||0);
+            row['Eksik Kriterler']=x.eksikKriterler;
+            row['Taslak Puanı (Boşlar 0)']=x.toplam;
+            row['Durum']='Taslak — resmî sonuca dahil değil';
+            return row;
+        });
         XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(taslakRows.length?taslakRows:[{'Bilgi':'Eksik taslak puan bulunamadı.'}]),'Taslak Simulasyonu');
         const tarih=new Date().toISOString().slice(0,10); XLSX.writeFile(wb,`Munazara_Sonuclari_${sonRaporVerisi.kategori}_${tarih}.xlsx`);
     }
