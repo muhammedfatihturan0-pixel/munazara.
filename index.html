@@ -445,16 +445,20 @@
         const durum=document.getElementById('puanTaslakDurumu');
         if(durum)durum.textContent='Taslak cihazda kaydedildi; Firebase yedeği kontrol ediliyor…';
         if(navigator.onLine&&firebaseBagli){
-            db.ref(ctx.cloudPath).set({...veri,updatedAt:firebase.database.ServerValue.TIMESTAMP})
-              .then(()=>{
+            db.ref(ctx.cloudPath).transaction(cur=>{
+                const tamamlandiAt=Number(cur?.tamamlandiAt||0);
+                if(cur?.durum==='gonderildi'&&tamamlandiAt>=Number(veri.localUpdatedAt||0))return cur;
+                if(Number(cur?.localUpdatedAt||0)>Number(veri.localUpdatedAt||0))return cur;
+                return {...veri,updatedAt:firebase.database.ServerValue.TIMESTAMP};
+            },undefined,false).then(result=>{
                 if(aktifPuanTaslak===ctx&&document.getElementById('puanTaslakDurumu'))
-                    document.getElementById('puanTaslakDurumu').textContent='✓ Taslak cihazda ve Firebase’de otomatik kaydedildi.';
-              })
-              .catch(err=>{
+                    document.getElementById('puanTaslakDurumu').textContent=result.committed
+                        ?'✓ Taslak cihazda ve Firebase’de otomatik kaydedildi.':'✓ Daha yeni bir taslak veya gönderim kaydı korundu.';
+            }).catch(err=>{
                 console.warn('Firebase puan taslağı yedeklenemedi:',err);
                 if(aktifPuanTaslak===ctx&&document.getElementById('puanTaslakDurumu'))
                     document.getElementById('puanTaslakDurumu').textContent='⚠ Taslak bu cihazda saklandı; Firebase yedeği yazılamadı.';
-              });
+            });
         }else if(durum)durum.textContent='⚠ Taslak bu cihazda saklandı; bağlantı gelince bulut yedeği alınacak.';
     }
     async function puanTaslaginiGeriYukle(ctx){
@@ -465,7 +469,11 @@
             try{
                 const snap=await db.ref(ctx.cloudPath).once('value');
                 const bulut=snap.val();
-                if(bulut&&bulut.puanlar&&(!veri||Number(bulut.localUpdatedAt||0)>=Number(veri.localUpdatedAt||0))){
+                const yerelAt=Number(veri?.localUpdatedAt||0);
+                if(bulut?.durum==='gonderildi'&&Number(bulut.tamamlandiAt||0)>=yerelAt){
+                    try{localStorage.removeItem(ctx.localKey);}catch(_){}
+                    veri=null;
+                }else if(bulut&&bulut.puanlar&&(!veri||Number(bulut.localUpdatedAt||0)>=yerelAt)){
                     veri=bulut;kaynak='Firebase';
                 }
             }catch(err){console.warn('Bulut puan taslağı okunamadı:',err);}
@@ -498,8 +506,15 @@
         if(!ctx)return;
         try{localStorage.removeItem(ctx.localKey);}catch(_){}
         if(navigator.onLine&&firebaseBagli){
-            try{await db.ref(ctx.cloudPath).remove();}
-            catch(err){console.warn('Tamamlanan puan taslağı Firebase’den kaldırılamadı:',err);}
+            try{
+                await db.ref(ctx.cloudPath).transaction(cur=>{
+                    if(!cur)return cur;
+                    if(cur.durum==='gonderildi')return cur;
+                    const now=Date.now();
+                    return {...cur,durum:'gonderildi',tamamlandiAt:now,
+                        tamamlananLocalUpdatedAt:Number(cur.localUpdatedAt||0)};
+                },undefined,false);
+            }catch(err){console.warn('Tamamlanan puan taslağı bulutta işaretlenemedi:',err);}
         }
     }
 
@@ -694,7 +709,13 @@
                 }
                 const rec = { ...item.kayit, serverSyncedAt: firebase.database.ServerValue.TIMESTAMP, offlineSynced: true };
                 await db.ref(`puanlar/${item.kategori}/${item.kayitId}`).set(rec);
-                if(item.taslakYolu)await db.ref(item.taslakYolu).remove().catch(e=>console.warn('Senkronize taslak kaldırılamadı:',e));
+                if(item.taslakYolu)await db.ref(item.taslakYolu).transaction(cur=>{
+                    if(!cur)return cur;
+                    if(cur.durum==='gonderildi')return cur;
+                    const now=Date.now();
+                    return {...cur,durum:'gonderildi',tamamlandiAt:now,
+                        tamamlananLocalUpdatedAt:Number(cur.localUpdatedAt||0),offlineSenkron:true};
+                },undefined,false).catch(e=>console.warn('Senkronize taslak kapatılamadı:',e));
                 if(item.taslakYerelAnahtari)try{localStorage.removeItem(item.taslakYerelAnahtari);}catch(_){}
                 // Puan kuyruğunu senkronize etmek ortak konuşma sayacını KAPATMAZ.
                 delete q[key];
