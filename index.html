@@ -2659,6 +2659,7 @@ Devam edilsin mi?`)){
                     <div><h4 style="margin-bottom:8px; color:var(--text-muted);">🏫 Okulların Toplam Puanları</h4><div id="school-leaderboard" class="school-total-box">Hesaplanıyor...</div></div>
                 </div>
                 <div id="raporJuriKontrolKart" class="kriter-card" style="margin-bottom:18px;"><h3 style="margin-top:0; color:var(--text-main);">Jüri Tamamlama Kontrolü</h3><div id="juryCoverage" style="overflow-x:auto;">Hesaplanıyor...</div></div>
+                <div id="taslakPuanAnalizi" class="kriter-card no-print" style="margin-bottom:18px;"><h3 style="margin-top:0;color:var(--text-main);">🧮 Eksik Taslak Puan Analizi</h3><div>Yükleniyor...</div></div>
                 <div class="no-print" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:15px;">
                     <button class="btn" style="background:var(--success);border:none;margin:0;" onclick="raporuExcelIndir()">Excel İndir (.xlsx)</button>
                     <button class="btn" style="background:var(--primary);border:none;margin:0;" onclick="raporTakimYazdir()">Seçili Gün · Tutanak / PDF</button>
@@ -2672,10 +2673,11 @@ Devam edilsin mi?`)){
             </div>`;
         try {
             const kat=secimler.kategori;
-            const [s, mSnap, fSnap] = await Promise.all([
+            const [s, mSnap, fSnap, taslakSnap] = await Promise.all([
                 db.ref('puanlar/' + kat).once('value'),
                 db.ref('maclar/' + kat).once('value'),
-                db.ref('fikstur/tekSalon_2026_2027').once('value').catch(err=>{console.warn('Rapor fikstür/isim yedeği okunamadı:',err);return null;})
+                db.ref('fikstur/tekSalon_2026_2027').once('value').catch(err=>{console.warn('Rapor fikstür/isim yedeği okunamadı:',err);return null;}),
+                db.ref('puanTaslaklari/' + kat).once('value').catch(err=>{console.warn('Taslak puanlar okunamadı:',err);return null;})
             ]);
             if(!document.getElementById('gunFiltre') || secimler.kategori!==kat)return;
             const kayitlar = snapshotKayitlariniTekillestir(s);
@@ -2693,14 +2695,14 @@ Devam edilsin mi?`)){
                     maclarMap[id]={...temel,...(maclarMap[id]||{}),fiksturNo:temel.fiksturNo,fiksturTarih:temel.fiksturTarih};
                 }
             }catch(err){console.warn('Sabit fikstür maçları listeye eklenemedi (mevcut kayıtlar korunur):',err);}
-            raporVerisiniIsle(kayitlar, maclarMap, resmiFikstur);
+            raporVerisiniIsle(kayitlar, maclarMap, resmiFikstur, taslakSnap?.val()||{});
         } catch (err) {
             console.error('Rapor verisi okunamadı:', err);
             alert('Sonuçlar okunamadı: ' + (err?.message || err));
         }
     }
 
-    function raporVerisiniIsle(kayitlar, maclarMap, resmiFikstur={}) {
+    function raporVerisiniIsle(kayitlar, maclarMap, resmiFikstur={}, taslaklar={}) {
         const mSet = new Map();
         const ogrenciPuanlari = {};
         const okulPuanlari = {};
@@ -2745,9 +2747,88 @@ Devam edilsin mi?`)){
         if(metrics) metrics.innerHTML=`<div class="admin-metric"><span>Tekil Puan Kaydı</span><strong>${kayitlar.length}</strong></div><div class="admin-metric"><span>Puanlanan Öğrenci/Maç</span><strong>${juriRows.length}</strong></div><div class="admin-metric"><span>3/3 Jüri Tamam</span><strong>${tamSayisi}</strong></div><div class="admin-metric"><span>Jürisi Eksik</span><strong>${eksikSayisi}</strong></div>`;
         const coverage=document.getElementById('juryCoverage');
         if(coverage){let html='<table class="tutanak-table"><tr><th>Maç</th><th>Okul</th><th>Öğrenci</th><th>Jüri Durumu</th><th>Eksik Jüri</th><th>Ortalama</th></tr>'; juriRows.forEach(x=>{const eksikler=BEKLENEN_JURILER.filter(j=>!x.juriler.has(j)); const tam=!eksikler.length; const ort=x.sayac?(x.toplam/x.sayac).toFixed(1):'-'; html += `<tr><td>${htmlEscape(x.mac)}</td><td>${htmlEscape(x.okul)}</td><td>${htmlEscape(x.ogrenci)}</td><td class="${tam?'jury-ok':'jury-missing'}">${x.juriler.size}/3</td><td>${tam?'—':htmlEscape(eksikler.join(', '))}</td><td>${ort}</td></tr>`;}); coverage.innerHTML=html+'</table>';}
-        sonRaporVerisi={kategori:secimler.kategori,kayitlar,juriRows,siraliList,siraliOkullar,maclarMap,resmiFikstur};
+        sonRaporVerisi={kategori:secimler.kategori,kayitlar,juriRows,siraliList,siraliOkullar,maclarMap,resmiFikstur,taslaklar:taslaklar||{}};
+        taslakPuanAnaliziniGoster();
         raporGunSecenekleriniDoldur();
         tutanakTablosuDoldur();
+    }
+
+    // Taslak puanlar yalnızca yöneticiye yönelik varsayımsal analizde kullanılır.
+    // Resmî puanları, kesinleşmiş sonucu veya turnuva ağacını hiçbir şekilde değiştirmez.
+    function taslakPuanAnaliziniDerle(veri=sonRaporVerisi){
+        if(!veri)return {kayitlar:[],maclar:[]};
+        const kayitlar=[],resmiKimlikler=new Set();
+        for(const v of veri.kayitlar||[]){
+            const s=v.secim||{};
+            resmiKimlikler.add([kayitMacId(v),s.juri||'',s.okul||'',s.ogr||''].map(x=>puanMetniNormalize(x).toLocaleLowerCase('tr-TR')).join('|'));
+        }
+        for(const [macId,grup] of Object.entries(veri.taslaklar||{})){
+            for(const [kayitId,v] of Object.entries(grup||{})){
+                if(!v||v.durum==='gonderildi')continue;
+                const s=v.secim||{};
+                const kimlik=[macId,s.juri||'',s.okul||'',s.ogr||''].map(x=>puanMetniNormalize(x).toLocaleLowerCase('tr-TR')).join('|');
+                if(resmiKimlikler.has(kimlik))continue;
+                const puanlar=v.puanlar||{};
+                let toplam=0,dolu=0;
+                const eksik=[];
+                const ayrinti=krit.map((k,i)=>{
+                    const raw=puanlar[i]??puanlar[String(i)];
+                    const n=Number(raw);
+                    const valid=raw!==null&&raw!==undefined&&raw!==''&&Number.isInteger(n)&&n>=1&&n<=k.m;
+                    if(valid){toplam+=n;dolu++;}
+                    else eksik.push(i+1);
+                    return valid?n:0;
+                });
+                const m=veri.maclarMap?.[macId]||{};
+                let taraf='';
+                if(skorEslesmeAnahtari(s.okul)===skorEslesmeAnahtari(m.hukOkul))taraf='huk';
+                else if(skorEslesmeAnahtari(s.okul)===skorEslesmeAnahtari(m.muhOkul))taraf='muh';
+                else if(s.taraf==='HÜKÜMET')taraf='huk';
+                else if(s.taraf==='MUHALEFET')taraf='muh';
+                kayitlar.push({macId,kayitId,juri:s.juri||'—',juriAd:s.juriAd||'—',
+                    okul:s.okul||'—',ogrenci:(s.ogr||'').split(' (')[0]||'—',
+                    dolu,eksikSayisi:13-dolu,eksikKriterler:eksik.join(', ')||'—',
+                    toplam,taraf,ayrinti,durum:v.durum||'taslak',updatedAt:v.updatedAt||v.localUpdatedAt||null});
+            }
+        }
+        const macGruplari=new Map();
+        for(const x of kayitlar){
+            if(!macGruplari.has(x.macId))macGruplari.set(x.macId,[]);
+            macGruplari.get(x.macId).push(x);
+        }
+        const maclar=[];
+        for(const [macId,items] of macGruplari){
+            const m=veri.maclarMap?.[macId]||{};
+            const resmi=raporTakimVerisiniDerle(veri).find(x=>x.id===macId);
+            const resmiH=(resmi?.roles||[]).reduce((t,x)=>t+x.huk,0);
+            const resmiM=(resmi?.roles||[]).reduce((t,x)=>t+x.muh,0);
+            const taslakH=items.filter(x=>x.taraf==='huk').reduce((t,x)=>t+x.toplam,0);
+            const taslakM=items.filter(x=>x.taraf==='muh').reduce((t,x)=>t+x.toplam,0);
+            const toplamH=resmiH+taslakH,toplamM=resmiM+taslakM;
+            const varsayimKazanan=toplamH>toplamM?(m.hukOkul||'Hükümet'):toplamM>toplamH?(m.muhOkul||'Muhalefet'):'Eşit';
+            maclar.push({macId,mac:m.etiket||macEtiketi(m.hukOkul||'Hükümet',m.muhOkul||'Muhalefet'),
+                resmiH,resmiM,taslakH,taslakM,toplamH,toplamM,varsayimKazanan,kayitSayisi:items.length});
+        }
+        return {kayitlar,maclar};
+    }
+
+    function taslakPuanAnaliziniGoster(){
+        const host=document.getElementById('taslakPuanAnalizi');
+        if(!host||!adminYetkiliMi()||!sonRaporVerisi)return;
+        const analiz=taslakPuanAnaliziniDerle();
+        sonRaporVerisi.taslakAnalizi=analiz;
+        if(!analiz.kayitlar.length){
+            host.innerHTML='<h3 style="margin-top:0;color:var(--text-main)">🧮 Eksik Taslak Puan Analizi</h3><div class="puanlama-bilgi">Bu kategoride resmî kaydı bulunmayan taslak puan yok. Resmî sonuçlar değişmez.</div>';
+            return;
+        }
+        let html='<h3 style="margin-top:0;color:var(--text-main)">🧮 Eksik Taslak Puan Analizi</h3><div class="puanlama-bilgi">Boş veya geçersiz kriterler bu simülasyonda <b>0 puan</b> kabul edilir. Taslaklar yalnızca aşağıdaki varsayımsal hesaba eklenir; resmî puanlara, kesinleşmiş galibe ve turnuva ağacına yazılmaz.</div>';
+        html+='<div style="overflow-x:auto"><table class="tutanak-table"><tr><th>Maç</th><th>Okul</th><th>Öğrenci</th><th>Jüri</th><th>Dolu Kriter</th><th>Eksik Kriter</th><th>Taslak Puanı</th></tr>';
+        for(const x of analiz.kayitlar)html+='<tr><td>'+htmlEscape(x.macId)+'</td><td>'+htmlEscape(x.okul)+'</td><td>'+htmlEscape(x.ogrenci)+'</td><td>'+htmlEscape(x.juriAd)+' ('+htmlEscape(x.juri)+')</td><td>'+x.dolu+'/13</td><td>'+htmlEscape(x.eksikKriterler)+'</td><td><b>'+x.toplam+'</b></td></tr>';
+        html+='</table></div>';
+        html+='<h4 style="color:var(--text-main);margin:18px 0 8px">Taslaklar eklenirse varsayımsal maç puanları</h4><div style="overflow-x:auto"><table class="tutanak-table"><tr><th>Maç</th><th>Resmî ham H/M</th><th>Taslak H/M</th><th>Varsayımsal toplam H/M</th><th>Varsayımsal üstün</th></tr>';
+        for(const x of analiz.maclar)html+='<tr><td>'+htmlEscape(x.mac)+'</td><td>'+x.resmiH+' / '+x.resmiM+'</td><td>'+x.taslakH+' / '+x.taslakM+'</td><td><b>'+x.toplamH+' / '+x.toplamM+'</b></td><td><b>'+htmlEscape(x.varsayimKazanan)+'</b></td></tr>';
+        html+='</table></div>';
+        host.innerHTML=html;
     }
 
     // V3.21 - Gün seçmeli resmî takım puan tutanağı: öğrenci kayıtları ayrıntıda korunur.
@@ -3058,6 +3139,12 @@ Devam edilsin mi?`)){
         XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sureRows.length?sureRows:[{'Bilgi':'Henüz öğrenci bazlı süre kaydı yok.'}]),'Ogrenci Sureleri');
         XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sureToplamRows.length?sureToplamRows:[{'Bilgi':'Henüz maç yok.'}]),'Sure Toplamlari');
         XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(kapananRows.length?kapananRows:[{'Bilgi':'Henüz kesinleşen sonuç yok.'}]),'Kesin Sonuclar');
+        const taslakRows=(sonRaporVerisi.taslakAnalizi?.kayitlar||[]).map(x=>({
+            'Maç ID':x.macId,'Okul':x.okul,'Öğrenci':x.ogrenci,'Jüri':x.juri,'Jüri Adı':x.juriAd,
+            'Dolu Kriter':x.dolu,'Eksik Kriterler':x.eksikKriterler,'Taslak Puanı (Boşlar 0)':x.toplam,
+            'Durum':'Taslak — resmî sonuca dahil değil'
+        }));
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(taslakRows.length?taslakRows:[{'Bilgi':'Eksik taslak puan bulunamadı.'}]),'Taslak Simulasyonu');
         const tarih=new Date().toISOString().slice(0,10); XLSX.writeFile(wb,`Munazara_Sonuclari_${sonRaporVerisi.kategori}_${tarih}.xlsx`);
     }
 
