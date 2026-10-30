@@ -2889,6 +2889,7 @@ Devam edilsin mi?`)){
     let yoneticiMacGorunumu = 'hafta'; // Sonuçlananlar arşivde; açık maçlar seçili haftada görünür.
     let yoneticiMacHaftaOffset = 0;
     let yoneticiMacHaftaSecimiHazir = false;
+    let yoneticiSonPanelMacSatirlari = [];
     // Resmî sonuç, operasyon maç kaydının durumundan BAĞIMSIZ bir Firebase ağacında tutulur.
     // Bu ekran yalnızca okur: 'AÇIK' kayıtları sessizce kapatmaz, sonuçları değiştirmez.
     function canliResmiMacSonucu(fiksturNo, kategori){
@@ -3708,21 +3709,14 @@ Devam edilsin mi?`)){
     }
 
     function yoneticiMacHaftasiniDegistir(delta){
-        const rows=yoneticiSonPanelVerileri?.[1]||{};
-        const all={...rows};
-        const available=yoneticiMacMaksimumHaftaOffseti(
-            Object.entries(all).map(([id,m])=>({id,m})).concat(
-                (yoneticiSonPanelVerileri?.[0]||[]).map(v=>({id:kayitMacId(v),m:{fiksturTarih:v.fiksturTarih||v.tarih||''}}))
-            )
-        );
+        const available=yoneticiMacMaksimumHaftaOffseti(yoneticiSonPanelMacSatirlari);
         yoneticiMacHaftaOffset=Math.max(0,Math.min(available,yoneticiMacHaftaOffset+(Number(delta)||0)));
         yoneticiMacGorunumu='hafta';
         if(yoneticiSonPanelVerileri)canliPaneliCiz(...yoneticiSonPanelVerileri);
     }
 
     function yoneticiEnYakinMacHaftasinaGit(){
-        yoneticiMacHaftaOffset=yoneticiMacEnYakinHaftaOffseti(yoneticiSonPanelVerileri?.[1]
-            ?Object.entries(yoneticiSonPanelVerileri[1]).map(([id,m])=>({id,m})):[]);
+        yoneticiMacHaftaOffset=yoneticiMacEnYakinHaftaOffseti(yoneticiSonPanelMacSatirlari);
         yoneticiMacGorunumu='hafta';
         if(yoneticiSonPanelVerileri)canliPaneliCiz(...yoneticiSonPanelVerileri);
     }
@@ -3761,6 +3755,7 @@ Devam edilsin mi?`)){
             rows.push({id,m,...g,huk,muh,hamPuan,resmiSonuc,durumText});
         });
         rows.sort((a,b)=>Number(a.m.fiksturNo||99999)-Number(b.m.fiksturNo||99999)||(a.m.etiket||'').localeCompare(b.m.etiket||'','tr'));
+        yoneticiSonPanelMacSatirlari=rows;
         const metrics=document.getElementById('liveMetrics');
         if(metrics){
             const noListesi=[...new Set(yoneticiFiksturMaclari.map(m=>Number(m.fiksturNo)).filter(n=>Number.isInteger(n)&&n>0))];
