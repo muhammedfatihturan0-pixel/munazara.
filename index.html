@@ -3920,6 +3920,8 @@ Devam edilsin mi?`)){
             } else if(iptal) actions+=but('↩ İptali Kaldır',`macIptaliniDegistir(${f},false)`,'#0f766e');
             else {
                 actions+=but('⏱ Süreleri Gör / Düzelt',`sureModalAc(${f})`,'#0369a1',kap && !sureKapanmisMacKaydiIzni(r.m));
+                if(!r.ready&&r.m.hukOkul&&r.m.muhOkul)
+                    actions+=but('🛟 Bulut Taslaklarını Tara / Kurtar','yoneticiEksikJuriTaslaklariniKurtar(\''+secimler.kategori+'\',\''+r.id+'\')','#a16207');
                 if(!kap&&!r.resmiSonuc)actions+=but('✓ Sonucu Kesinleştir',`macDurumuDegistir(${f},'kapali')`,'#0f766e');
                 if(!kap&&r.resmiSonuc){actions+=but('✏ Resmî Galibi Düzelt',`yoneticiResmiGalibiDuzelt(${f})`,'#7c3aed');actions+='<div class="sure-hint">Yalnız bu maçın galibi değiştirilir; diğer eşleşmelere dokunulmaz.</div>'; }
                 if(kap&&r.m.sonuc?.senkronDurum!=='tamam'){actions+=but('☁ Fikstür Senkronunu Onar',`macEsitlemeyiTekrarDene(${f})`,'#a16207');}
@@ -3952,6 +3954,142 @@ Devam edilsin mi?`)){
             const b=document.getElementById(id);
             if(b){b.textContent=label;b.style.background=yoneticiMacGorunumu===view?'#0f766e':'#475569';b.style.opacity=yoneticiMacGorunumu===view?'1':'0.88';}
         }
+    }
+
+    async function yoneticiEksikJuriTaslaklariniKurtar(kategori,macId){
+      if(!adminYetkiliMi()||!navigator.onLine||!firebaseBagli)return alert('Bulut taslaklarını kontrol etmek için çevrimiçi yönetici girişi gerekir.');
+      const lock='taslak-kurtarma|'+kategori+'|'+macId;
+      if(aktifSonucIslemleri.has(lock))return;
+      aktifSonucIslemleri.add(lock);
+      try{
+        const mac=await yoneticiMaciniHazirla(kategori,macId);
+        if(!mac||!mac.hukOkul||!mac.muhOkul)throw new Error('Maçın iki okul bilgisi doğrulanamadı.');
+        const res=await Promise.all([
+          db.ref('okullar/'+kategori).once('value'),
+          db.ref('puanlar/'+kategori).once('value')
+        ]);
+        const okullar=puanlamaRosteriGetir(res[0]);
+        const mevcut={};
+        res[1].forEach(function(c){
+          const v=c.val();
+          if(v&&v.secim&&v.puanlar)mevcut[puanKayitKimligi(v.secim,kayitMacId(v))]=v;
+        });
+        const taraflar=[
+          {taraf:'huk',label:'HÜKÜMET',okul:mac.hukOkul},
+          {taraf:'muh',label:'MUHALEFET',okul:mac.muhOkul}
+        ];
+        const roller=['1. Jüri','2. Jüri','3. Jüri'];
+        const adaylar=[],kismi=[];
+        for(const taraf of taraflar){
+          const kaynak=guvenliKadroKaynagiBul(okullar,mac,taraf.taraf,[]);
+          if(!kaynak||!okullar[kaynak]||!okullar[kaynak].length)
+            throw new Error(taraf.okul+' için öğrenci listesi tekil ve güvenli biçimde eşleştirilemedi.');
+          const ogrenciler=okullar[kaynak];
+          for(let i=0;i<ogrenciler.length;i++){
+            const ad=String(ogrenciler[i]||'').trim();
+            if(!ad)continue;
+            const konusmaci=i<3?(i+1)+'. Konuşmacı':'Grup Sözcüsü';
+            const ogrEtiketi=ad+' ('+konusmaci+')';
+            for(const juri of roller){
+              const secim={
+                kategori:kategori,macId:macId,hukOkul:mac.hukOkul,muhOkul:mac.muhOkul,
+                juri:juri,okul:taraf.okul,ogr:ogrEtiketi,taraf:taraf.label
+              };
+              const kayitId=puanKayitKimligi(secim,macId);
+              if(mevcut[kayitId])continue;
+              const taslakRef=db.ref('puanTaslaklari/'+kategori+'/'+macId+'/'+kayitId);
+              const taslakSnap=await taslakRef.once('value');
+              const taslak=taslakSnap.val();
+              if(!taslak||!taslak.puanlar)continue;
+              const ks=taslak.secim||{};
+              const dogruKimlik=
+                String(taslak.macId||'')===String(macId)&&
+                String(ks.kategori||'')===String(kategori)&&
+                String(ks.juri||'')===juri&&
+                skorEslesmeAnahtari(ks.okul)===skorEslesmeAnahtari(taraf.okul)&&
+                skorEslesmeAnahtari(ks.ogr)===skorEslesmeAnahtari(ogrEtiketi)&&
+                String(ks.taraf||'')===taraf.label&&
+                skorEslesmeAnahtari(ks.hukOkul)===skorEslesmeAnahtari(mac.hukOkul)&&
+                skorEslesmeAnahtari(ks.muhOkul)===skorEslesmeAnahtari(mac.muhOkul)&&
+                !!ks.juriAd;
+              const puanlarTam=krit.every(function(k,index){
+                const p=Number(taslak.puanlar[index]!==undefined?taslak.puanlar[index]:taslak.puanlar[String(index)]);
+                return Number.isInteger(p)&&p>=1&&p<=k.m;
+              });
+              if(!dogruKimlik){kismi.push(ad+' · '+juri+' (kimlik eşleşmedi)');continue;}
+              if(!puanlarTam){kismi.push(ad+' · '+juri+' ('+Object.keys(taslak.puanlar||{}).length+'/13)');continue;}
+              adaylar.push({kayitId,taslakRef,taslak,secim:ks,ogr:ad,juri,taraf:taraf.label});
+            }
+          }
+        }
+        if(!adaylar.length){
+          const mesaj=kismi.length
+            ?'Tam 13/13 kriterli ve kimliği doğrulanmış bulut taslağı bulunamadı. '+kismi.length+' kısmi/uyuşmayan taslak bulundu; bunlar resmî puanlara aktarılmadı.'
+            :'Eksik kayıtlar için Firebase’de bulut taslağı bulunamadı. Hiçbir puan eklenmedi.';
+          return alert(mesaj+' Mevcut maç sonucu ve kazanan değiştirilmedi.');
+        }
+        const liste=adaylar.map(function(x){return '• '+x.juri+' · '+x.ogr+' · '+x.taraf;}).join('\n');
+        const onay=confirm(
+          'TAMAMLANMIŞ BULUT TASLAKLARINI KURTAR\n\n'+
+          adaylar.length+' adet 13/13 kriterli taslak bulundu:\n'+liste+'\n\n'+
+          'Yalnızca resmî puan kaydı olmayan anahtarlar oluşturulacak. Mevcut puanlar üzerine yazılmayacak. '+
+          'Maçın kapalı/açık durumu, kesinleşmiş sonucu ve kazanan alanına dokunulmayacak.\n\nAktarılsın mı?'
+        );
+        if(!onay)return;
+        let restored=0,already=0,failed=0;
+        for(const item of adaylar){
+          const officialRef=db.ref('puanlar/'+kategori+'/'+item.kayitId);
+          try{
+            const recovered={
+              ...item.taslak,
+              secim:{...item.secim},
+              macId:macId,
+              mac:macEskiEtiketi(mac.hukOkul,mac.muhOkul),
+              macEtiketi:mac.etiket||macEtiketi(mac.hukOkul,mac.muhOkul),
+              queuedOffline:false,
+              recoveredFromCloudDraft:true,
+              recoveredBy:'yonetici',
+              recoveredAt:firebase.database.ServerValue.TIMESTAMP,
+              updatedAt:firebase.database.ServerValue.TIMESTAMP,
+              recoveryNote:'Tam 13/13 Firebase puan taslağından; mevcut maç sonucu değiştirilmeden geri yüklendi.'
+            };
+            const tx=await officialRef.transaction(function(cur){return cur?cur:recovered;},undefined,false);
+            const live=tx.snapshot?tx.snapshot.val():null;
+            if(!tx.committed||!firebasePuanKaydiEslesiyor(live,recovered)){
+              if(live)already++;else failed++;
+              continue;
+            }
+            restored++;
+            const auditRef=db.ref('arsiv/juriPuanKurtarma/'+kategori+'/'+macId+'/'+item.kayitId);
+            await auditRef.set({
+              islem:'tamamlanmis_bulut_taslagindan_puan_kurtarma',
+              kategori: kategori,macId:macId,kayitId:item.kayitId,
+              juri:item.juri,ogr:item.ogr,taraf:item.taraf,
+              taslak:item.taslak,geriYuklenen:recovered,
+              mevcutMacSonucuKorundu:true,
+              createdAt:firebase.database.ServerValue.TIMESTAMP
+            }).catch(function(e){console.warn('Puan kurtarma denetim kaydı yazılamadı:',e);});
+            await item.taslakRef.transaction(function(cur){
+              if(!cur)return cur;
+              return {...cur,durum:'gonderildi',tamamlandiAt:Date.now(),
+                yoneticiTarafindanKurtarildi:true,geriYuklenenKayitId:item.kayitId};
+            },undefined,false).catch(function(e){console.warn('Kurtarılan taslak kapatılamadı:',e);});
+          }catch(err){
+            console.error('Taslak kurtarma kaydı başarısız:',item.kayitId,err);
+            failed++;
+          }
+        }
+        alert(
+          'Kurtarma tamamlandı.\n\n'+
+          'Firebase’e eklenen tam puan kaydı: '+restored+'\n'+
+          'İşlem sırasında zaten var olduğu görülen: '+already+'\n'+
+          'Aktarılamayan: '+failed+'\n\n'+
+          'Mevcut maç sonucu ve kazanan alanı değiştirilmedi.'
+        );
+        if(document.getElementById('liveMatches'))renderYoneticiCanliPanel();
+      }catch(err){
+        alert('Bulut taslağı taraması/kurtarma yapılamadı: '+(err&&err.message||err));
+      }finally{aktifSonucIslemleri.delete(lock);}
     }
 
     async function macHukmenKapat(kategori,macId){
