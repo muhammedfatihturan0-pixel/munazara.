@@ -2924,9 +2924,12 @@ Devam edilsin mi?`)){
         // Puan, sayaç, toplam süre, sonuç ve mevcut diğer alanlar aynen korunur.
         const durumMetni=String(mac.durum||'').trim();
         const durumNorm=durumMetni.toLocaleLowerCase('tr-TR').replace(/ı/g,'i').replace(/ç/g,'c');
-        const durumTaninmiyor=!!durumMetni&&!['acik','open','kapali','closed','iptal','cancelled'].includes(durumNorm);
+        const durumBilinen=['acik','open','kapali','closed','iptal','cancelled'].includes(durumNorm);
         const durumEksik=!durumMetni;
-        if((!mac.hukOkul||!mac.muhOkul||durumEksik||(!durumTaninmiyor&&durumNorm!==durumMetni.toLocaleLowerCase('tr-TR'))) && f?.hukOkul && f?.muhOkul){
+        const durumDuzeltmeGerekli=durumBilinen&&mac.durum!==(
+            ['acik','open'].includes(durumNorm)?'acik':
+            ['kapali','closed'].includes(durumNorm)?'kapali':'iptal');
+        if((!mac.hukOkul||!mac.muhOkul||durumEksik||durumDuzeltmeGerekli) && f?.hukOkul && f?.muhOkul){
             const repaired=await ref.transaction(cur=>{
                 if(!cur)return cur;
                 const next={...cur};
