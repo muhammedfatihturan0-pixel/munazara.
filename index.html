@@ -4027,9 +4027,9 @@ Devam edilsin mi?`)){
             } else if(iptal) actions+=but('↩ İptali Kaldır',`macIptaliniDegistir(${f},false)`,'#0f766e');
             else {
                 if(!kap&&!r.resmiSonuc)actions+=but('✓ Sonucu Kesinleştir',`macDurumuDegistir(${f},'kapali')`,'#0f766e');
-                if(!kap&&r.resmiSonuc){actions+=but('✏ Resmî Galibi Düzelt',`yoneticiResmiGalibiDuzelt(${f})`,'#7c3aed');actions+='<div class="sure-hint">Yalnız bu maçın galibi değiştirilir; diğer eşleşmelere dokunulmaz.</div>'; }
-                if(kap&&r.m.sonuc?.senkronDurum!=='tamam'){actions+=but('☁ Fikstür Senkronunu Onar',`macEsitlemeyiTekrarDene(${f})`,'#a16207');}
                 let istisnalar='';
+                if(!kap&&r.resmiSonuc){istisnalar+=but('✏ Resmî Galibi Düzelt',`yoneticiResmiGalibiDuzelt(${f})`,'#7c3aed');istisnalar+='<div class="sure-hint">Yalnız bu maçın galibi değiştirilir; diğer eşleşmelere dokunulmaz.</div>'; }
+                if(kap&&r.m.sonuc?.senkronDurum!=='tamam'){istisnalar+=but('☁ Fikstür Senkronunu Onar',`macEsitlemeyiTekrarDene(${f})`,'#a16207');}
                 istisnalar+=but('⏱ Süreleri Gör / Düzelt',`sureModalAc(${f})`,'#0369a1',kap && !sureKapanmisMacKaydiIzni(r.m));
                 if(!kap){
                     if(!r.ready&&r.m.hukOkul&&r.m.muhOkul)
