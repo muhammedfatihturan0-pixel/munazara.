@@ -2456,7 +2456,20 @@ Devam edilsin mi?`)){
                 puanGondermeEngelNedeni:'Ortak sayaç bitişinden sonraki 10 saniye doldu.'});
             return alert('Ortak sayaç bitişinden sonraki 10 saniyelik puanlama süresi doldu. Puanlar gönderilmedi. Gerekliyse isteğe bağlı ve gerekçeli ortak süre sıfırlaması kullanabilirsiniz.');
         }
-        if(Object.keys(verilenPuanlar).length < 13) return alert('Lütfen tüm 13 kriteri puanlayın!');
+        // Gönderim öncesi 13 kriterin tamamını tek tek doğrula.
+        // Sadece kayıt sayısına bakmak, geçersiz/eksik indeksleri veya sınır dışı puanları yakalamaz.
+        if(krit.length !== 13) return alert('Puanlama yapılandırmasında 13 kriter bulunamadı. Yöneticiye bildiriniz; puanlar taslakta korunuyor.');
+        const eksikVeyaGecersiz = [];
+        for(let i=0;i<13;i++){
+            const puan=verilenPuanlar?.[i];
+            const maxPuan=Number(krit[i]?.m);
+            if(!Number.isInteger(puan)||puan<1||puan>maxPuan){
+                eksikVeyaGecersiz.push(`${i+1}. kriter — ${krit[i].t} (1-${maxPuan} arası tam sayı)`);
+            }
+        }
+        if(eksikVeyaGecersiz.length){
+            return alert('Puanlar gönderilmedi. Lütfen aşağıdaki kriterleri tamamlayın veya düzeltin:\\n\\n'+eksikVeyaGecersiz.join('\\n')+'\\n\\nMevcut puanlarınız taslak olarak korunmuştur.');
+        }
         const oturum = juriOturumuGetir();
         if (!oturum) return alert('Günün jüri listesinden adınızı seçip kilitleyin.');
         const seciliFixture = puanlamaMaclar.get(secimler.macId);
