@@ -3674,6 +3674,10 @@ Devam edilsin mi?`)){
         skorlar.forEach(v=>{const id=kayitMacId(v);if(!inferred[id])inferred[id]={id,etiket:kayitMacEtiketi(v),hukOkul:v.secim?.hukOkul||'',muhOkul:v.secim?.muhOkul||'',durum:'acik'};});
         const rows=[];
         Object.entries(inferred).forEach(([id,m])=>{
+            const takimMetni=[m?.hukOkul,m?.muhOkul].filter(Boolean).join(' ').toLocaleLowerCase('tr-TR');
+            if(m?.isPending || !m?.hukOkul || !m?.muhOkul ||
+               /maç\s+galibi|tur\s+galibi|kura\s+beklen|belirlenecek|canlı\s+kura|protokol/.test(takimMetni) ||
+               [m.hukOkul,m.muhOkul].some(x=>['boş','bay'].includes(fiksturIstisnaNorm(x))))return;
             const g=macTamamlamaOzeti(skorlar,id,m,okullar);
             const huk=Number(g.toplamlar[m.hukOkul]||0),muh=Number(g.toplamlar[m.muhOkul]||0);
             const sure=m.sureEsitlik||(()=>{
