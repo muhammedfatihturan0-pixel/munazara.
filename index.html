@@ -2886,7 +2886,9 @@ Devam edilsin mi?`)){
     let yoneticiFiksturMaclari = [];
     let yoneticiResmiFiksturDurumu = null;
     let yoneticiSonPanelVerileri = null;
-    let yoneticiMacGorunumu = 'hafta'; // Güncel haftayı göster; sonuçlananlar otomatik arşive ayrılır.
+    let yoneticiMacGorunumu = 'hafta'; // Sonuçlananlar arşivde; açık maçlar seçili haftada görünür.
+    let yoneticiMacHaftaOffset = 0;
+    let yoneticiMacHaftaSecimiHazir = false;
     // Resmî sonuç, operasyon maç kaydının durumundan BAĞIMSIZ bir Firebase ağacında tutulur.
     // Bu ekran yalnızca okur: 'AÇIK' kayıtları sessizce kapatmaz, sonuçları değiştirmez.
     function canliResmiMacSonucu(fiksturNo, kategori){
@@ -2961,6 +2963,8 @@ Devam edilsin mi?`)){
     function renderYoneticiCanliPanel() {
         if(!adminYetkiliMi())return alert('Yönetici yetkisi gerekiyor.');
         yoneticiMacGorunumu='hafta';
+        yoneticiMacHaftaOffset=0;
+        yoneticiMacHaftaSecimiHazir=false;
         yoneticiFiksturMaclari=[];
         yoneticiResmiFiksturDurumu=null;
         dinleyicileriTemizle();
@@ -3649,17 +3653,78 @@ Devam edilsin mi?`)){
             (m.durum==='kapali' && !!m.sonuc);
     }
 
-    function yoneticiTarihAraligi(){
+    function yoneticiTarihAraligi(haftaOffset=0){
         const now=new Date();
         const key=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
         const monday=new Date(today);
-        monday.setDate(today.getDate()-((today.getDay()+6)%7));
-        const next7=new Date(today);
-        next7.setDate(today.getDate()+7);
+        monday.setDate(today.getDate()-((today.getDay()+6)%7)+(Number(haftaOffset)||0)*7);
         const sunday=new Date(monday);
         sunday.setDate(monday.getDate()+6);
-        return {today:key(today),monday:key(monday),sunday:key(sunday),next7:key(next7)};
+        return {today:key(today),monday:key(monday),sunday:key(sunday),start:monday,end:sunday};
+    }
+
+    function yoneticiMacTarihDegeri(row){
+        const key=raporFiksturTarihAnahtari(row?.m?.fiksturTarih||row?.m?.tarih||'');
+        if(!key)return null;
+        const [y,mo,d]=key.split('-').map(Number);
+        const date=new Date(y,mo-1,d);
+        return Number.isFinite(date.getTime())?date:null;
+    }
+
+    function yoneticiMacEnYakinHaftaOffseti(rows){
+        const today=yoneticiTarihAraligi(0);
+        const todayDate=new Date(today.today+'T00:00:00');
+        const currentMonday=new Date(today.monday+'T00:00:00');
+        const upcoming=rows.filter(r=>!yoneticiMacArsivdeMi(r))
+            .map(yoneticiMacTarihDegeri).filter(d=>d&&d>=todayDate).sort((a,b)=>a-b);
+        if(!upcoming.length)return 0;
+        const target=new Date(upcoming[0].getFullYear(),upcoming[0].getMonth(),upcoming[0].getDate());
+        const targetMonday=new Date(target);
+        targetMonday.setDate(target.getDate()-((target.getDay()+6)%7));
+        return Math.max(0,Math.round((targetMonday-currentMonday)/604800000));
+    }
+
+    function yoneticiMacMaksimumHaftaOffseti(rows){
+        const current=yoneticiTarihAraligi(0);
+        const todayDate=new Date(current.today+'T00:00:00');
+        const currentMonday=new Date(current.monday+'T00:00:00');
+        const offsets=rows.filter(r=>!yoneticiMacArsivdeMi(r))
+            .map(yoneticiMacTarihDegeri).filter(d=>d&&d>=todayDate)
+            .map(d=>{
+                const monday=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+                monday.setDate(monday.getDate()-((monday.getDay()+6)%7));
+                return Math.max(0,Math.round((monday-currentMonday)/604800000));
+            });
+        return offsets.length?Math.max(...offsets):0;
+    }
+
+    function yoneticiMacSiralamaZamani(row){
+        const date=yoneticiMacTarihDegeri(row);
+        if(!date)return Number.MAX_SAFE_INTEGER;
+        const time=String(row?.m?.fiksturSaat||'').match(/(\\d{1,2}):(\\d{2})/);
+        const minutes=time?Number(time[1])*60+Number(time[2]):1439;
+        return date.getTime()+minutes*60000;
+    }
+
+    function yoneticiMacHaftasiniDegistir(delta){
+        const rows=yoneticiSonPanelVerileri?.[1]||{};
+        const all={...rows};
+        const available=yoneticiMacMaksimumHaftaOffseti(
+            Object.entries(all).map(([id,m])=>({id,m})).concat(
+                (yoneticiSonPanelVerileri?.[0]||[]).map(v=>({id:kayitMacId(v),m:{fiksturTarih:v.fiksturTarih||v.tarih||''}}))
+            )
+        );
+        yoneticiMacHaftaOffset=Math.max(0,Math.min(available,yoneticiMacHaftaOffset+(Number(delta)||0)));
+        yoneticiMacGorunumu='hafta';
+        if(yoneticiSonPanelVerileri)canliPaneliCiz(...yoneticiSonPanelVerileri);
+    }
+
+    function yoneticiEnYakinMacHaftasinaGit(){
+        yoneticiMacHaftaOffset=yoneticiMacEnYakinHaftaOffseti(yoneticiSonPanelVerileri?.[1]
+            ?Object.entries(yoneticiSonPanelVerileri[1]).map(([id,m])=>({id,m})):[]);
+        yoneticiMacGorunumu='hafta';
+        if(yoneticiSonPanelVerileri)canliPaneliCiz(...yoneticiSonPanelVerileri);
     }
 
     function yoneticiMacGorunumuSec(gorunum){
@@ -3706,9 +3771,13 @@ Devam edilsin mi?`)){
             metrics.innerHTML=`<div class="admin-metric"><span>Resmî Fikstür Maçı</span><strong>${noListesi.length||'—'}</strong></div><div class="admin-metric"><span>Resmî Sonuç (Kesin / Bekleyen)</span><strong>${yoneticiResmiFiksturDurumu?kesinlesen+'/'+bekleyen:'Yükleniyor'}</strong></div><div class="admin-metric"><span>Jürisi Tam Maç</span><strong>${tamMac}</strong></div><div class="admin-metric"><span>Bu Cihaz Kuyruğu</span><strong>${q}</strong></div>`;
         }
         const div=document.getElementById('liveMatches');if(!div)return;
-        const aralik=yoneticiTarihAraligi();
         const arsivdekiler=rows.filter(yoneticiMacArsivdeMi);
         const aktifler=rows.filter(r=>!yoneticiMacArsivdeMi(r));
+        if(!yoneticiMacHaftaSecimiHazir && yoneticiFiksturMaclari.length){
+            yoneticiMacHaftaOffset=yoneticiMacEnYakinHaftaOffseti(rows);
+            yoneticiMacHaftaSecimiHazir=true;
+        }
+        const aralik=yoneticiTarihAraligi(yoneticiMacHaftaOffset);
         let gorunen=[];
         if(yoneticiMacGorunumu==='arsiv')gorunen=arsivdekiler;
         else if(yoneticiMacGorunumu==='bugun')gorunen=aktifler.filter(r=>{
@@ -3717,10 +3786,10 @@ Devam edilsin mi?`)){
         });
         else gorunen=aktifler.filter(r=>{
             const tarih=raporFiksturTarihAnahtari(r.m.fiksturTarih||r.m.tarih||'');
-            // Tarihi geçip henüz sonuçlanmamış kayıtları kaybetme; güncel haftanın
-            // tüm maçları ve sonuç bekleyen eski kayıtlar bu görünümde kalır.
-            return !tarih||(tarih>=aralik.today&&tarih<=aralik.next7);
+            return !tarih?yoneticiMacHaftaOffset===0:(tarih>=aralik.monday&&tarih<=aralik.sunday);
         });
+        gorunen.sort((a,b)=>yoneticiMacSiralamaZamani(a)-yoneticiMacSiralamaZamani(b)||
+            Number(a.m.fiksturNo||99999)-Number(b.m.fiksturNo||99999));
 
         const search=skorEslesmeAnahtari(document.getElementById('liveMatchSearch')?.value||'');
         const iptalGoster=document.getElementById('iptalGoster')?.checked||false;
@@ -3766,8 +3835,24 @@ Devam edilsin mi?`)){
             const idPrefix=r.m.fiksturNo?'#'+r.m.fiksturNo+' · ':'';
             html+=`<tr><td>${htmlEscape(idPrefix+(r.m.etiket||macEtiketi(r.m.hukOkul,r.m.muhOkul)))}</td><td class="${kap||iptal?'jury-missing':'jury-ok'}">${tip}<div style="font-size:10px">${state}</div></td><td class="${r.ready?'jury-ok':'jury-missing'}">${r.total?`${r.tam}/${r.total}`:`${r.kayitliTam}/${r.kayitliOgrenci}`}${!r.total&&r.kayitliOgrenci?'<div style="font-size:10px;color:#fbbf24">Puan kayıtlarından · kadro doğrulanmadı</div>':''}${r.eksik?`<div style="font-size:10px">${htmlEscape(r.eksikRoller.join(', '))}</div>`:''}</td><td class="sure-skor">${puan}<div style="font-size:10px;color:var(--text-muted);white-space:nowrap">${htmlEscape(puanAciklamasi)}</div></td><td class="sure-skor">${sure?.hukSaniye!=null?sureyiMetneDonustur(sure.hukSaniye):'—'} / ${sure?.muhSaniye!=null?sureyiMetneDonustur(sure.muhSaniye):'—'}${sure?.kaynak==='otomatik'?'<div style="font-size:10px;color:#7dd3fc">Ortak sayaçlardan</div>':''}</td><td style="font-size:11px">${htmlEscape(r.durumText)}</td><td class="live-actions" style="min-width:145px">${actions}</td></tr>`;
         });
-        div.innerHTML=html+(bulunan.length?'':'<tr><td colspan="7">'+
-            (yoneticiMacGorunumu==='arsiv'?'Henüz arşivlenmiş maç bulunmuyor.':yoneticiMacGorunumu==='bugun'?'Bugün için açık maç bulunmuyor. Bu haftayı seçerek diğer maçları görebilirsiniz.':'Bu haftada sonuç bekleyen maç bulunmuyor.')+
+        let haftaGezinti='';
+        if(yoneticiMacGorunumu==='hafta'){
+            const maxOffset=yoneticiMacMaksimumHaftaOffseti(rows);
+            const tarihFmt=new Intl.DateTimeFormat('tr-TR',{day:'numeric',month:'long'});
+            const haftaBas=tarihFmt.format(aralik.start);
+            const haftaSon=tarihFmt.format(aralik.end);
+            const yil=aralik.end.getFullYear();
+            haftaGezinti=`<div class="no-print" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin:10px 0;padding:9px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)">
+                <button class="btn" style="width:auto;margin:0;padding:8px 12px" onclick="yoneticiMacHaftasiniDegistir(-1)" ${yoneticiMacHaftaOffset<=0?'disabled':''}>← Önceki hafta</button>
+                <div style="text-align:center;flex:1;min-width:145px"><b>${haftaBas} – ${haftaSon} ${yil}</b><div class="sure-hint" style="margin:2px 0 0">${weekCount} açık maç · en yakın saat önce</div></div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+                    <button class="btn" style="width:auto;margin:0;padding:8px 12px;background:#475569" onclick="yoneticiEnYakinMacHaftasinaGit()">En yakın maç haftası</button>
+                    <button class="btn" style="width:auto;margin:0;padding:8px 12px" onclick="yoneticiMacHaftasiniDegistir(1)" ${yoneticiMacHaftaOffset>=maxOffset?'disabled':''}>Sonraki hafta →</button>
+                </div>
+            </div>`;
+        }
+        div.innerHTML=haftaGezinti+html+(bulunan.length?'':'<tr><td colspan="7">'+
+            (yoneticiMacGorunumu==='arsiv'?'Henüz arşivlenmiş maç bulunmuyor.':yoneticiMacGorunumu==='bugun'?'Bugün için açık maç bulunmuyor.': 'Bu haftada sonuç bekleyen maç bulunmuyor.')+
             '</td></tr>')+'</table>';
 
         const archiveCount=arsivdekiler.length;
@@ -3777,11 +3862,11 @@ Devam edilsin mi?`)){
         }).length;
         const weekCount=aktifler.filter(r=>{
             const t=raporFiksturTarihAnahtari(r.m.fiksturTarih||r.m.tarih||'');
-            return !t||(t>=aralik.today&&t<=aralik.next7);
+            return !t?yoneticiMacHaftaOffset===0:(t>=aralik.monday&&t<=aralik.sunday);
         }).length;
         const viewConfig=[
             ['bugun','liveViewBugun',`Bugün (${todayCount})`],
-            ['hafta','liveViewHafta',`Önümüzdeki 7 Gün (${weekCount})`],
+            ['hafta','liveViewHafta',`Hafta (${weekCount})`],
             ['arsiv','liveViewArsiv',`Arşiv (${archiveCount})`]
         ];
         for(const [view,id,label] of viewConfig){
