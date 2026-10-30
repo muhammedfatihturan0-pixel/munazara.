@@ -3703,7 +3703,7 @@ Devam edilsin mi?`)){
     function yoneticiMacSiralamaZamani(row){
         const date=yoneticiMacTarihDegeri(row);
         if(!date)return Number.MAX_SAFE_INTEGER;
-        const time=String(row?.m?.fiksturSaat||'').match(/(\\d{1,2}):(\\d{2})/);
+        const time=String(row?.m?.fiksturSaat||'').match(/(\d{1,2}):(\d{2})/);
         const minutes=time?Number(time[1])*60+Number(time[2]):1439;
         return date.getTime()+minutes*60000;
     }
