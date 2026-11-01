@@ -2127,16 +2127,23 @@
         return {key:ref.key,kategori,local:false,update:patch=>ref.update({...patch,updatedAt:firebase.database.ServerValue.TIMESTAMP})};
     }
     async function juriSureOturumLogunuGuncelle(patch){
+        let d=null,base=null;
         try{
             const raw=localStorage.getItem(JURI_SURE_AUDIT_OTURUM_KEY);if(!raw)return;
-            const d=JSON.parse(raw);if(!d?.kategori||!d?.logId)return;
-            const base=juriSureDenetimTemeli();
+            d=JSON.parse(raw);if(!d?.kategori||!d?.logId)return;
+            base=juriSureDenetimTemeli();
             if(d.kategori!==base.kategori||d.macId!==base.macId||
                puanMetniNormalize(d.okul)!==puanMetniNormalize(base.okul)||
                puanMetniNormalize(d.ogrenci)!==puanMetniNormalize(base.ogrenci))return;
-            if(!(d.local&&juriSureYerelAuditGuncelle(d.kategori,d.logId,patch)))
-                await db.ref(`arsiv/juriSureOlaylari/${d.kategori}/${d.logId}`).update({...patch,updatedAt:firebase.database.ServerValue.TIMESTAMP});
-        }catch(err){console.warn('Jüri/süre oturum günlüğü güncellenemedi:',err);}
+            if(d.local&&juriSureYerelAuditGuncelle(d.kategori,d.logId,patch))return;
+            await db.ref(`arsiv/juriSureOlaylari/${d.kategori}/${d.logId}`).update({...patch,updatedAt:firebase.database.ServerValue.TIMESTAMP});
+        }catch(err){
+            console.warn('Jüri/süre oturum günlüğü güncellenemedi; yerel denetim kuyruğuna alınacak:',err);
+            if(d?.kategori&&d?.logId){
+                try{juriSureAuditGuncellemeKuyrugaAl(d.kategori,d.logId,base||{},patch);}
+                catch(queueErr){console.warn('Jüri/süre denetim günlüğü yerel kuyruğa da yazılamadı:',queueErr);}
+            }
+        }
     }
     async function juriSureOturumLogla(durum='acildi',ek={}){
         try{
@@ -6315,7 +6322,7 @@ Devam edilsin mi?`)){
     window.addEventListener('online',()=>{networkDurumunuGuncelle();offlineKuyruguGonder();});
     window.addEventListener('offline',networkDurumunuGuncelle);
     db.ref('.info/connected').on('value',s=>{firebaseBagli=s.val()===true;networkDurumunuGuncelle();if(firebaseBagli){offlineKuyruguGonder();void juriSureAuditKuyrugunuGonder();}});
-    setInterval(()=>offlineKuyruguGonder(),15000);
+    setInterval(()=>{offlineKuyruguGonder();void juriSureAuditKuyrugunuGonder();},15000);
 
     window.onload=function(){
         const oturum=juriOturumuGetir();
