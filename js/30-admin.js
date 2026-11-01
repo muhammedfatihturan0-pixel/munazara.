@@ -35,7 +35,7 @@
                 <div id="juriCanliTakipHost" class="admin-jury-monitor-grid">
                     <div class="admin-jury-monitor-empty">Jüri durumları okunuyor…</div>
                 </div>
-                <div class="admin-jury-monitor-foot">Bu ekran yalnızca ${gun} tarihli ${kategori==='lise'?'lise':'ortaokul'} jüri cihaz durumlarını okur. Puan, fikstür ve turnuva kayıtlarını değiştirmez. Bağlantı kesilirse tabletin son görülme zamanı gösterilir.</div>
+                <div id="juriCanliTakipNotu" class="admin-jury-monitor-foot">Yalnızca seçilen gün ve kategoriye ait jüri cihaz durumları gösterilir. Puan, fikstür ve turnuva kayıtları değiştirilmez.</div>
                 <div class="admin-jury-monitor-actions"><button class="btn" onclick="renderYoneticiMenu()">← Yönetici Paneli</button><button class="btn" onclick="renderYoneticiCanliPanel()">Maç Yönetimine Git →</button></div>
             </main>`;
         juriCanliTakibiniBaslat();
@@ -77,7 +77,7 @@
         const lastStatus=String(r.lastScoreStatus||'');
         const statusTone=pending?'warning':lastStatus==='error'?'error':lastStatus==='success'?'success':lastStatus==='queued'||lastStatus==='pending'?'warning':'neutral';
         const connText=online?'Bağlı':r.connectionStatus==='oturum_kapali'?'Jüri oturumu kapatıldı':lastSeen?'Bağlantı yok':'Henüz giriş yapmadı';
-        const stateText=pending?pending+' puan kuyrukta':lastStatus==='success'?'Son puan doğrulandı':lastStatus==='error'?'Son gönderimde hata':lastStatus==='queued'?'Gönderim bekliyor':r.screen==='puanlama'?'Puanlama ekranında':r.screen==='juri_secim'?'Jüri seçim ekranında':'Hazır';
+        const stateText=!lastSeen?'Henüz durum kaydı yok':pending?pending+' puan kuyrukta':lastStatus==='success'?'Son puan doğrulandı':lastStatus==='error'?'Son gönderimde hata':lastStatus==='queued'?'Gönderim bekliyor':r.screen==='puanlama'?'Puanlama ekranında':r.screen==='juri_secim'?'Jüri seçim ekranında':'Hazır';
         const identity=r.ad||'Jüri oturumu henüz açılmadı';
         const roleName=r.yedekMi?'Yedek jüri · '+(r.yedekYerine||label)+' koltuğu':label;
         const currentMatch=[r.macEtiketi,r.taraf,r.okul].filter(Boolean).join(' · ');
@@ -123,6 +123,8 @@
         const gun=document.getElementById('juriCanliGun')?.value||'';
         const kategori=document.getElementById('juriCanliKategori')?.value||'ortaokul';
         if(!host||!/^\\d{4}-\\d{2}-\\d{2}$/.test(gun))return;
+        const note=document.getElementById('juriCanliTakipNotu');
+        if(note)note.textContent='Yalnızca '+gun+' tarihli '+(kategori==='lise'?'lise':'ortaokul')+' jüri cihaz durumları gösterilir. Puan, fikstür ve turnuva kayıtları değiştirilmez.';
         juriCanliTakipRefiniKapat();
         host.innerHTML='<div class="admin-jury-monitor-empty">Üç jüri tabletinden canlı durum bekleniyor…</div>';
         const ref=db.ref(JURI_CANLI_DURUM_YOLU+'/'+gun+'/'+kategori);
