@@ -474,3 +474,119 @@ body { padding-top: 72px; }
  .admin-dashboard-group h2 {font-size:15px;}
  .admin-tool-card {min-height:67px;padding:9px;}
 }
+
+/* 3.39 — Jüri modülü: adım adım seçim ve tablet öncelikli puanlama */
+.juri-selection-card {max-width:1080px !important;margin:24px auto 30px;padding:clamp(16px,2.2vw,28px);}
+.juri-selection-header,.juri-scoring-header {display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px;}
+.juri-page-eyebrow {display:block;margin-bottom:6px;color:#7dd3fc;font-size:10px;font-weight:850;letter-spacing:.14em;}
+.juri-selection-header h2,.juri-scoring-header h2 {margin:0 0 5px;padding:0;border:0;color:#f8fafc;font-size:clamp(21px,2.5vw,27px);letter-spacing:-.5px;}
+.juri-selection-header p,.juri-scoring-header p {margin:0;color:#9fb2c9;font-size:12px;line-height:1.5;}
+.juri-header-mark,.juri-scoring-role {flex:0 0 auto;padding:7px 10px;border:1px solid #345573;border-radius:999px;background:#112a45;color:#a9d8ff;font-size:10px;font-weight:750;}
+.juri-selection-card .puan-guvence-juri-actions {display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 15px;}
+.juri-selection-card .puan-guvence-juri-actions button {min-height:37px;padding:8px 12px;border-color:#3c5f81;background:#142b46;font-size:11px;}
+.juri-selection-card #juriOturumPanel {margin:12px 0 16px;padding:13px 15px;border-radius:12px;background:#111f33;}
+.juri-selection-card #juriOturumPanel > div {line-height:1.55;}
+.juri-step-block {margin:14px 0 0;padding:15px;border:1px solid #30465f;border-radius:14px;background:linear-gradient(135deg,rgba(15,31,51,.96),rgba(13,26,44,.93));}
+.juri-step-heading {display:flex;align-items:center;gap:10px;margin:0 0 12px;}
+.juri-step-heading > span {display:grid;place-items:center;width:29px;height:29px;flex:0 0 29px;border:1px solid #37648e;border-radius:9px;background:#183b60;color:#c7e6ff;font-size:11px;font-weight:850;}
+.juri-step-heading > div {display:flex;flex-direction:column;gap:2px;}
+.juri-step-heading b {color:#edf5ff;font-size:13px;}
+.juri-step-heading small {color:#91a8c2;font-size:10px;line-height:1.4;}
+.juri-category-grid .btn {min-height:48px;margin:0;border-radius:10px;font-size:13px;letter-spacing:.03em;}
+.juri-selection-card #puanlamaVeriDurumu {min-width:0;flex:1 1 240px;border-radius:9px;}
+.juri-selection-card #aktifMac {min-height:48px;border-radius:10px;border-color:#47617f;background:#0d1b2d;font-size:14px;}
+.juri-match-summary {margin-top:9px;padding:10px 12px;border:1px solid #30465f;border-radius:9px;background:rgba(7,17,30,.44);color:#b5c7dc;font-size:11px;line-height:1.55;}
+.juri-selection-card .puanlama-manuel {margin-top:7px;padding:0 10px;border:1px dashed #3b5875;border-radius:9px;background:rgba(12,27,45,.4);}
+.juri-selection-card .puanlama-manuel summary {padding:10px 0;font-size:11px;font-weight:700;}
+.juri-selection-card .puanlama-manuel select {min-height:43px;}
+.juri-side-grid .btn {display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:67px;margin:0;padding:10px;border:1px solid #3a506a;border-radius:11px;font-size:13px;font-weight:850;}
+.juri-side-grid .btn small {color:#aabed4;font-size:10px;font-weight:500;line-height:1.3;overflow-wrap:anywhere;}
+.juri-side-grid .btn-active small {color:#f0f9ff;}
+.juri-student-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+.juri-student-grid .ogr-btn {display:flex;align-items:center;justify-content:flex-start;min-width:0;min-height:58px;margin:0;padding:11px 13px;border:1px solid #334a63;border-radius:10px;background:#14243a;color:#dce8f5;text-align:left;font-size:12px;line-height:1.4;overflow-wrap:anywhere;box-shadow:none;}
+.juri-student-grid .ogr-btn::before {content:"";display:block;width:8px;height:8px;flex:0 0 8px;margin-right:9px;border:2px solid #68829e;border-radius:50%;}
+.juri-student-grid .ogr-btn.btn-active {border-color:#3b82f6;background:linear-gradient(110deg,#17437b,#15345a);color:#fff;box-shadow:inset 0 0 0 1px rgba(96,165,250,.2);}
+.juri-student-grid .ogr-btn.btn-active::before {border-color:#86efac;background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.13);}
+.juri-selection-empty {grid-column:1/-1;padding:15px;border:1px dashed #3b536e;border-radius:10px;color:#91a8c2;text-align:center;font-size:11px;}
+.juri-live-status {padding:13px 15px;border-radius:12px;border-color:#344e69;background:#101f33;font-size:12px;}
+.juri-start-scoring-button {display:flex;align-items:center;justify-content:space-between;gap:15px;min-height:58px;margin:17px 0 10px;padding:13px 17px;border:1px solid #3983c4;border-radius:12px;background:linear-gradient(105deg,#174a81,#1d4ed8);color:#fff;font-size:15px;font-weight:850;box-shadow:0 8px 22px rgba(29,78,216,.18);}
+.juri-start-scoring-button span {font-size:22px;}
+.juri-start-scoring-button:disabled {opacity:.45;filter:saturate(.4);}
+.juri-advanced-settings {margin-top:7px;padding:10px 12px;border:1px dashed #765b2c;border-radius:10px;background:rgba(88,55,13,.12);}
+.juri-advanced-settings summary {color:#facc75;font-size:11px;font-weight:750;cursor:pointer;}
+.juri-advanced-settings p {margin:8px 0;color:#c6b38f;font-size:10px;line-height:1.5;}
+.juri-advanced-settings .btn {max-width:340px;margin:8px 0 0;padding:9px 12px;font-size:11px;}
+.juri-back-button {max-width:240px;margin:14px auto 0;background:#334155 !important;}
+/* Puanlama ekranı: iki sütunlu kriter kartları, büyük ve dokunmatik puanlar */
+.juri-scoring-card {max-width:1180px !important;margin:18px auto 38px;padding:clamp(14px,2vw,26px);}
+.juri-scoring-header {align-items:center;margin-bottom:16px;}
+.juri-scoring-header h2 {font-size:clamp(22px,2.6vw,30px);}
+.juri-scoring-role {text-align:center;white-space:normal;}
+.juri-scoring-card #ortakKonusmaSayaci,.juri-scoring-card #puanGirisSureNotu,.juri-scoring-card #juriSureBilgisi {margin:8px 0;border-radius:10px;font-size:12px;line-height:1.5;}
+.puan-progress-card {position:relative;margin:13px 0 17px;padding:14px 16px;border:1px solid #34516d;border-radius:13px;background:linear-gradient(110deg,#102944,#112239);}
+.puan-progress-top {display:flex;align-items:center;justify-content:space-between;gap:15px;}
+.puan-progress-top > div:first-child {display:flex;flex-direction:column;gap:4px;}
+.puan-progress-top span,.puan-progress-total small {color:#91b9da;font-size:9px;font-weight:850;letter-spacing:.11em;}
+.puan-progress-top strong {color:#f8fafc;font-size:15px;font-variant-numeric:tabular-nums;}
+.puan-progress-total {display:flex;flex-direction:column;align-items:flex-end;gap:3px;}
+.puan-progress-total b {color:#fde68a;font-size:20px;font-variant-numeric:tabular-nums;}
+.puan-progress-track {height:7px;margin:12px 0 8px;overflow:hidden;border-radius:999px;background:#263b53;}
+.puan-progress-track > div {height:100%;border-radius:999px;background:linear-gradient(90deg,#0ea5e9,#22c55e);transition:width .18s ease;}
+.puan-progress-foot {display:flex;justify-content:space-between;gap:10px;color:#9fb4ca;font-size:10px;line-height:1.4;}
+#kriterListesi.juri-criteria-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:stretch;}
+#kriterListesi .puan-kriter-kart {min-width:0;margin:0;padding:13px 14px;border:1px solid #33485f;border-radius:12px;background:linear-gradient(145deg,#111f32,#0f1b2c);transition:border-color .15s,background .15s;}
+#kriterListesi .puan-kriter-kart.is-complete {border-color:#24754f;background:linear-gradient(145deg,rgba(13,61,47,.55),#0f1e2d);}
+.puan-kriter-head {display:flex;align-items:flex-start;justify-content:space-between;gap:9px;min-height:39px;}
+.puan-kriter-title {display:flex;align-items:flex-start;gap:9px;min-width:0;}
+.puan-kriter-no {display:grid;place-items:center;width:25px;height:25px;flex:0 0 25px;border:1px solid #3c5773;border-radius:8px;background:#1a3048;color:#b8d7f3;font-size:10px;font-weight:850;}
+.puan-kriter-title .kriter-label {padding-top:2px;color:#e9f1fa;font-size:12px;line-height:1.4;font-weight:700;}
+.puan-kriter-meta {display:flex;flex:0 0 auto;flex-direction:column;align-items:flex-end;gap:4px;white-space:nowrap;}
+.puan-kriter-max {color:#8ea6bf;font-size:9px;}
+.puan-kriter-value {color:#facc75;font-size:10px;}
+.puan-kriter-kart.is-complete .puan-kriter-value {color:#86efac;}
+#kriterListesi .puan-row {display:flex;flex-wrap:nowrap;gap:5px;margin-top:10px;}
+#kriterListesi .puan-btn {display:grid;place-items:center;flex:1 1 0;min-width:0;max-width:54px;width:auto;height:43px;padding:0;border:1px solid #3b5068;border-radius:9px;background:#1b2b40;color:#c3d2e2;font-size:13px;font-weight:800;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+#kriterListesi .puan-btn:hover {border-color:#7da3c8;background:#263d58;color:#fff;}
+#kriterListesi .puan-btn:focus-visible {outline:3px solid #93c5fd;outline-offset:2px;}
+#kriterListesi .puan-btn.selected {border-color:#22c55e;background:#16804a;color:#fff;box-shadow:0 0 0 2px rgba(34,197,94,.16);}
+.juri-draft-status {margin:13px 0 8px;border-radius:10px;font-size:11px;line-height:1.45;}
+.puanlama-action-bar {position:sticky;bottom:0;z-index:80;display:grid;grid-template-columns:minmax(120px,.55fr) minmax(230px,1.2fr) auto;align-items:center;gap:10px;margin:12px -1px -1px;padding:12px;border:1px solid #36516e;border-radius:13px;background:rgba(9,23,39,.96);box-shadow:0 -8px 24px rgba(0,0,0,.25);backdrop-filter:blur(12px);}
+.puan-action-summary {display:flex;flex-direction:column;gap:3px;}
+.puan-action-summary strong {color:#f8fafc;font-size:16px;font-variant-numeric:tabular-nums;}
+.puan-action-summary span {color:#8fa7c1;font-size:9px;}
+.puanlama-action-bar #btnPuanGonder {min-height:47px;margin:0;padding:10px 15px;border:0;border-radius:10px;background:#16804a;color:#fff;font-size:13px;font-weight:850;}
+.puanlama-action-bar #btnPuanGonder:disabled {background:#34465a;color:#9badbf;opacity:1;}
+.puan-action-back {min-height:42px;padding:8px 12px;border:1px solid #40566f;border-radius:9px;background:#182a40;color:#d4e3f2;font-size:10px;font-weight:700;cursor:pointer;}
+@media (max-width:980px) {
+ #kriterListesi.juri-criteria-grid {grid-template-columns:1fr;}
+ .juri-scoring-card {max-width:850px !important;}
+}
+@media (max-width:650px) {
+ .juri-selection-card {margin:8px auto 20px;padding:12px;}
+ .juri-selection-header,.juri-scoring-header {flex-direction:column;align-items:flex-start;gap:8px;}
+ .juri-header-mark,.juri-scoring-role {align-self:flex-start;}
+ .juri-step-block {padding:11px;}
+ .juri-student-grid {grid-template-columns:1fr;}
+ .juri-side-grid .btn {min-height:60px;font-size:12px;}
+ .juri-scoring-card {margin:6px auto 25px;padding:10px;}
+ #kriterListesi .puan-kriter-kart {padding:11px;}
+ #kriterListesi .puan-row {gap:4px;}
+ #kriterListesi .puan-btn {height:45px;font-size:13px;border-radius:8px;}
+ .puan-progress-card {padding:11px;}
+ .puan-progress-foot {flex-direction:column;gap:3px;}
+ .puanlama-action-bar {grid-template-columns:1fr 1fr;gap:8px;padding:9px;}
+ .puan-action-summary {grid-column:1/2;}
+ .puanlama-action-bar #btnPuanGonder {grid-column:2/3;grid-row:1/3;min-height:62px;font-size:12px;}
+ .puan-action-back {grid-column:1/2;grid-row:2/3;}
+}
+@media (max-width:390px) {
+ .juri-category-grid .btn {font-size:11px;padding:9px 6px;}
+ .puan-kriter-head {gap:6px;}
+ .puan-kriter-title {gap:6px;}
+ .puan-kriter-title .kriter-label {font-size:11px;}
+ .puan-kriter-no {width:23px;height:23px;flex-basis:23px;}
+ .puan-kriter-max {font-size:8px;}
+ .puan-kriter-value {font-size:9px;}
+ .puanlama-action-bar {grid-template-columns:1fr 1fr;}
+ .puanlama-action-bar #btnPuanGonder {font-size:10px;}
+}
