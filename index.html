@@ -1279,9 +1279,9 @@
             juriSureAuditKuyruguGetir().forEach(item=>rowMap.set(`${item.kategori}/${item.logId}`,
                 {...item.kayit,kategori:item.kategori,logId:item.logId,durum:item.kayit?.durum||'aktarim_bekliyor',syncDurumu:'bekliyor'}));
             const rows=Array.from(rowMap.values());
-            rows.sort((a,b)=>Number(b.createdAt||b.clientAt||0)-Number(a.createdAt||a.clientAt||0));
+            rows.sort((a,b)=>Number(b.queuedAt||b.updatedAt||b.createdAt||b.clientAt||b.updatedClientAt||0)-Number(a.queuedAt||a.updatedAt||a.createdAt||a.clientAt||a.updatedClientAt||0));
             if(!rows.length){host.textContent='Henüz jüri/süre işlem günlüğü bulunmuyor. Bu sürümden itibaren açılış, süre engeli, sıfırlama uygulaması ve iptal bilgileri burada birikir.';return;}
-            const tarih=v=>{const n=Number(v.createdAt||v.clientAt||0);return n?new Date(n).toLocaleString('tr-TR'):'Tarih bekleniyor';};
+            const tarih=v=>{const n=Number(v.queuedAt||v.updatedAt||v.createdAt||v.clientAt||v.updatedClientAt||0);return n?new Date(n).toLocaleString('tr-TR'):'Tarih bekleniyor';};
             const evetHayir=v=>v===true?'Evet':v===false?'Hayır':'—';
             const html=rows.map(v=>{
                 const puanHam=v.puanVerisi||v.puanlar||{};
@@ -3571,7 +3571,7 @@ Devam edilsin mi?`)){
             return;
         }
         const rows=sorunlar.slice(0,12).map(v=>{
-            const at=Number(v.updatedAt||v.createdAt||v.clientAt||v.updatedClientAt||0);
+            const at=Number(v.queuedAt||v.updatedAt||v.createdAt||v.clientAt||v.updatedClientAt||0);
             const tarih=at?new Date(at).toLocaleString('tr-TR'):'Tarih bekleniyor';
             const durum=String(v.durum||'Kontrol gerekli');
             const aciklama=v.hata||v.puanKuyrukHatasi||v.puanGondermeEngelNedeni||
