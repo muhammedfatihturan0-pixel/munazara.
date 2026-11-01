@@ -290,7 +290,7 @@
 </div>
 
 <script>
-    const APP_VERSION = '3.34 · Jüri Puan Aktarım Takibi';
+    const APP_VERSION = '3.35 · Kayıp Önleme ve Bekleyen Puan Kurtarma';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -784,6 +784,24 @@
         const bulut=snap.val();
         return {ok:firebasePuanKaydiEslesiyor(bulut, beklenen),bulut};
     }
+    async function puanReddedilenKaydiniArsivle(item,neden,durum='puan_gonderimi_arsivlendi'){
+        if(!item?.kayit||!item?.kategori||!item?.macId||!item?.kayitId)
+            throw new Error('Reddedilen puan arşivi için maç/kayıt bilgisi eksik.');
+        const ref=db.ref(`arsiv/juriPuanYedekleri/${item.kategori}/${item.macId}/${item.kayitId}/reddedilen`);
+        const arsivKaydi={...item.kayit,reddedildi:true,reddedilmeNedeni:String(neden||'Resmî puan kaydına alınmadı.'),
+            reddedildiAt:firebase.database.ServerValue.TIMESTAMP,
+            yedekAt:firebase.database.ServerValue.TIMESTAMP,yedekOlayi:'juri_puani_resmi_disinda_koruma'};
+        await ref.set(arsivKaydi);
+        const kontrol=await ref.once('value');
+        if(!firebasePuanKaydiEslesiyor(kontrol.val(),item.kayit))
+            throw new Error('Reddedilen puan arşive yazıldı ancak 13 kriter geri okunarak doğrulanamadı.');
+        await puanAktarimDenetiminiGuncelle(item,{
+            durum, hata:String(neden||'Puan resmî kayda alınmadı; arşivde korundu.'),
+            puanVerisi:{...(item.kayit.puanlar||{})},puanKayitId:item.kayitId,
+            puanGonderildi:false,puanKuyrugaAlindi:false,reddedilenPuanArsivlendi:true
+        });
+        return true;
+    }
 
 
     function offlineKuyrukKaydet(q) {
@@ -839,16 +857,33 @@
     }
 
     let offlineKuyrukGonderiliyor=false;
+    function puanKuyrukAnahtari(kategori,kayitId){return `${kategori}__${kayitId}`;}
+    function puanKuyrukDurumunuGuncelle(kategori,kayitId,patch={}){
+        const q=offlineKuyrukGetir(),key=puanKuyrukAnahtari(kategori,kayitId);
+        if(!q[key])return false;
+        q[key]={...q[key],...patch,sonYerelGuncellemeAt:Date.now()};
+        offlineKuyrukKaydet(q);
+        return true;
+    }
+    function puanKuyrugundanSil(kategori,kayitId){
+        const q=offlineKuyrukGetir(),key=puanKuyrukAnahtari(kategori,kayitId);
+        if(!q[key])return false;
+        delete q[key];offlineKuyrukKaydet(q);return true;
+    }
     function puaniKuyrugaEkle(item) {
         const q = offlineKuyrukGetir();
-        const key = `${item.kategori}__${item.kayitId}`;
+        const key = puanKuyrukAnahtari(item.kategori,item.kayitId);
+        const onceki=q[key]||{};
         const audit=aktifJuriAuditKaydiniBul(item.kategori,item.macId);
-        q[key] = { ...item, auditLogId:item.auditLogId||audit?.logId||'',
-            queuedAt: Date.now(), queueStatus: 'bekliyor' };
+        q[key] = { ...onceki, ...item,
+            auditLogId:item.auditLogId||onceki.auditLogId||audit?.logId||'',
+            queuedAt: onceki.queuedAt||item.queuedAt||Date.now(),
+            queueStatus: item.queueStatus||onceki.queueStatus||'bekliyor' };
         offlineKuyrukKaydet(q);
-        puanFirebaseDurumuYaz('queued','⚠ Puan bu cihazda kuyruğa alındı; Firebase’de henüz doğrulanmadı. Bağlantı geldiğinde yeniden gönderilecek. Bu uyarı kalkmadan kaydı gönderildi saymayın.',{
+        puanFirebaseDurumuYaz('queued','⚠ Puan bu cihazda kalıcı gönderim kuyruğuna alındı; Firebase’den geri okunarak doğrulanana kadar resmî kaydedildi sayılmayacak.',{
             kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
         });
+        return q[key];
     }
 
     async function offlineKuyruguGonder() {
@@ -863,21 +898,30 @@
             for (const key of keys) {
                 const item = q[key];
                 try {
+                    // Gönderim fonksiyonu ön kontrollerdeyse ikinci worker kayıtla yarışmaz.
+                    if(['gonderim_on_kontrol','gonderim_devam_ediyor'].includes(item.queueStatus)){
+                        const baslangic=Number(item.gonderimBaslatmaAt||item.queuedAt||Date.now());
+                        if(Date.now()-baslangic<120000)continue;
+                        q[key].queueStatus='bekliyor';degisti=true;
+                    }
+                    // Süre/maç engeliyle reddedilen kayıtlar hiçbir durumda resmî puana çevrilmez.
+                    if(['mac_kapali_arsiv_bekliyor','sure_engeli_arsiv_bekliyor'].includes(item.queueStatus)){
+                        await puanReddedilenKaydiniArsivle(item,item.reddedilmeNedeni||'Puan resmî kayda alınamadı; yönetici incelemesi için arşivlendi.',
+                            item.queueStatus==='mac_kapali_arsiv_bekliyor'?'puan_mac_kapali_arsivlendi':'puan_sure_engeli_arsivlendi');
+                        delete q[key];degisti=true;continue;
+                    }
                     const mSnap = await db.ref(`maclar/${item.kategori}/${item.macId}`).once('value');
                     const m = mSnap.val();
                     if (m && ['kapali','iptal'].includes(m.durum)) {
-                        const neden=m.durum==='iptal'?'Maç iptal edildiği için çevrimdışı puan otomatik aktarılamadı.':'Maç kapatıldığı için çevrimdışı puan otomatik aktarılamadı.';
-                        q[key].queueStatus = m.durum==='iptal'?'mac_iptal':'mac_kapali';
-                        degisti = true;
-                        await puanAktarimDenetiminiGuncelle(item,{
-                            durum:'puan_kuyruk_engeli_mac_kapali',hata:neden,queueStatus:q[key].queueStatus,
-                            puanGonderildi:false,puanKuyrugaAlindi:true
-                        });
-                        continue;
+                        const neden=m.durum==='iptal'?'Maç iptal edildiği için çevrimdışı puan resmî kayda aktarılamadı.':'Maç kapatıldığı için çevrimdışı puan resmî kayda aktarılamadı.';
+                        q[key].queueStatus='mac_kapali_arsiv_bekliyor';q[key].officialSendAllowed=false;
+                        q[key].reddedilmeNedeni=neden;degisti=true;offlineKuyrukKaydet(q);
+                        await puanReddedilenKaydiniArsivle(item,neden,'puan_mac_kapali_arsivlendi');
+                        delete q[key];degisti=true;continue;
                     }
                     const rec = { ...item.kayit, serverSyncedAt: firebase.database.ServerValue.TIMESTAMP, offlineSynced: true };
                     const puanRef=db.ref(`puanlar/${item.kategori}/${item.kayitId}`);
-                    // Aynı jüri daha sonra daha yeni bir puan gönderdiyse eski çevrimdışı kuyruk bu kaydı ezemez.
+                    // Aynı jüri daha sonra yeni puan gönderdiyse eski kuyruk kaydı yenisini ezemez.
                     const mevcutSnap=await puanRef.once('value');
                     const mevcut=mevcutSnap.val();
                     if(mevcut && Number(mevcut.localUpdatedAt||0)>Number(rec.localUpdatedAt||0)){
@@ -888,21 +932,17 @@
                             hata:'Kuyruktaki eski puan yerine Firebase’deki daha yeni ve kimliği doğrulanmış jüri kaydı korundu.',
                             puanGonderildi:true,puanKuyrugaAlindi:false,puanKayitDogrulandi:true
                         });
-                        delete q[key];
-                        degisti=true;
-                        puanFirebaseDurumuTemizle(item.kayitId);
-                        continue;
+                        delete q[key];degisti=true;puanFirebaseDurumuTemizle(item.kayitId);continue;
                     }
                     await puanRef.set(rec);
                     const dogrulama=await firebasePuanKaydiniDogrula(puanRef,rec);
                     if(!dogrulama.ok)throw new Error('Firebase kuyruğa alınan puanı geri okuyup doğrulayamadı. Kayıt kuyrukta korunuyor.');
-                    // Çevrimdışı gönderim de çevrimiçi gönderim gibi bağımsız arşiv yedeği üretir.
                     let yedekHatasi='';
                     try{
                         const yedekYolu=`arsiv/juriPuanYedekleri/${item.kategori}/${item.macId}/${item.kayitId}`;
                         await db.ref(yedekYolu+'/sonDurum').set({...rec,yedekAt:firebase.database.ServerValue.TIMESTAMP});
                         await db.ref(yedekYolu+'/gecmis/'+String(item.queuedAt||Date.now())).set({...rec,yedekAt:firebase.database.ServerValue.TIMESTAMP,yedekOlayi:'juri_puani_offline_senkronize'});
-                    }catch(yedekErr){yedekHatasi=String(yedekErr?.message||yedekErr);console.warn('Offline puan doğrulandı ancak arşiv yedeği yazılamadı:',yedekErr);}
+                    }catch(yedekErr){yedekHatasi=String(yedekErr?.message||yedekErr);console.warn('Offline puan doğrulandı ancak bağımsız arşiv yedeği yazılamadı:',yedekErr);}
                     if(item.taslakYolu)await db.ref(item.taslakYolu).transaction(cur=>{
                         if(!cur)return cur;
                         if(cur.durum==='gonderildi')return cur;
@@ -916,21 +956,22 @@
                         puanKuyrugaAlindi:false,puanKayitDogrulandi:true,puanGonderildiClientAt:Date.now(),
                         ...(yedekHatasi?{yedekHatasi,yedekDurumu:'ikincil_yedek_yazilamadi'}:{yedekDurumu:'kaydedildi'})
                     });
-                    // Puan kuyruğunu senkronize etmek ortak konuşma sayacını KAPATMAZ.
-                    delete q[key];
-                    degisti = true;
-                    puanFirebaseDurumuTemizle(item.kayitId);
+                    delete q[key];degisti=true;puanFirebaseDurumuTemizle(item.kayitId);
                 } catch (err) {
                     console.warn('Offline kuyruk gönderilemedi:', err);
                     const code = String(err?.code || '').toLowerCase();
-                    if (code.includes('permission')) q[key].queueStatus = 'yetki_hatasi';
+                    const arsivSadece=item.officialSendAllowed===false ||
+                        ['mac_kapali_arsiv_bekliyor','sure_engeli_arsiv_bekliyor'].includes(item.queueStatus);
+                    if(arsivSadece)q[key].queueStatus=item.queueStatus||'reddedilen_arsiv_bekliyor';
+                    else if (code.includes('permission')) q[key].queueStatus = 'yetki_hatasi';
                     else if(String(err?.message||'').includes('daha yeni bir kayıt')) q[key].queueStatus='kayit_cakismasi';
                     else q[key].queueStatus = 'dogrulama_bekliyor';
+                    q[key].lastError=String(err?.message||err);
                     degisti = true;
                     await puanAktarimDenetiminiGuncelle(item,{
-                        durum:code.includes('permission')?'puan_kuyruk_yetki_hatasi':'puan_kuyruk_senkron_hatasi',
+                        durum:arsivSadece?'puan_reddi_arsiv_hatasi':(code.includes('permission')?'puan_kuyruk_yetki_hatasi':'puan_kuyruk_senkron_hatasi'),
                         hata:String(err?.message||err),queueStatus:q[key].queueStatus,
-                        puanGonderildi:false,puanKuyrugaAlindi:true
+                        puanVerisi:{...(item.kayit?.puanlar||{})},puanGonderildi:false,puanKuyrugaAlindi:true
                     });
                     puanFirebaseDurumuYaz('error','⚠ Kuyruktaki puan Firebase’den doğrulanamadı. Kayıt bu cihazda korunuyor; yönetici kontrolü olmadan gönderildi kabul etmeyin.',{
                         kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
@@ -1243,7 +1284,10 @@
             const tarih=v=>{const n=Number(v.createdAt||v.clientAt||0);return n?new Date(n).toLocaleString('tr-TR'):'Tarih bekleniyor';};
             const evetHayir=v=>v===true?'Evet':v===false?'Hayır':'—';
             const html=rows.map(v=>{
-                const details=[v.sebep?`Gerekçe: ${v.sebep}`:'',v.hata?`Hata: ${v.hata}`:'',v.puanKuyrukHatasi?`Kuyruk hatası: ${v.puanKuyrukHatasi}`:'',v.firebaseHatasiKodu?`Firebase kodu: ${v.firebaseHatasiKodu}`:'',v.puanGondermeEngelNedeni?`Gönderim engeli: ${v.puanGondermeEngelNedeni}`:'',v.queueStatus?`Kuyruk durumu: ${v.queueStatus}`:'',v.kayitId?`Kayıt: ${v.kayitId}`:'',v.yedekHatasi?`İkincil yedek hatası: ${v.yedekHatasi}`:'',v.iptalNedeni?`İptal: ${v.iptalNedeni}`:'',v.sifirlamaDurumu?`Sıfırlama durumu: ${v.sifirlamaDurumu}`:'',v.kaynakEkran?`Kaynak: ${v.kaynakEkran}`:'',v.syncDurumu==='bekliyor'?'Denetim kaydı aktarım bekliyor':'' ].filter(Boolean).join(' · ');
+                const puanHam=v.puanVerisi||v.puanlar||{};
+                const puanDetayi=Array.from({length:13},(_,i)=>puanHam[i]??puanHam[String(i)]??null);
+                const puanDetayiMetni=puanDetayi.some(x=>x!==null)?'13 kriter: '+puanDetayi.map(x=>x===null?'—':x).join(' / '):'';
+                const details=[puanDetayiMetni,v.reddedilenPuanArsivlendi?'Puan resmî tabloya eklenmeden arşivlendi':'',v.sebep?`Gerekçe: ${v.sebep}`:'',v.hata?`Hata: ${v.hata}`:'',v.puanKuyrukHatasi?`Kuyruk hatası: ${v.puanKuyrukHatasi}`:'',v.firebaseHatasiKodu?`Firebase kodu: ${v.firebaseHatasiKodu}`:'',v.puanGondermeEngelNedeni?`Gönderim engeli: ${v.puanGondermeEngelNedeni}`:'',v.queueStatus?`Kuyruk durumu: ${v.queueStatus}`:'',v.kayitId?`Kayıt: ${v.kayitId}`:'',v.yedekHatasi?`İkincil yedek hatası: ${v.yedekHatasi}`:'',v.iptalNedeni?`İptal: ${v.iptalNedeni}`:'',v.sifirlamaDurumu?`Sıfırlama durumu: ${v.sifirlamaDurumu}`:'',v.kaynakEkran?`Kaynak: ${v.kaynakEkran}`:'',v.syncDurumu==='bekliyor'?'Denetim kaydı aktarım bekliyor':'' ].filter(Boolean).join(' · ');
                 const state=String(v.durum||'—');
                 const color=state==='uygulandi'||state==='acildi'||state.startsWith('puanlar_gonderildi')?'#34d399':state.includes('engellendi')||state.includes('hata')||state.includes('kuyru')||state==='basarisiz'?'#fca5a5':state==='iptal_edildi'?'#fbbf24':'#cbd5e1';
                 return `<tr><td style="white-space:nowrap">${htmlEscape(tarih(v))}</td><td>${htmlEscape(v.islem||'—')}</td><td>${htmlEscape(v.kategori||'—')}<br>${htmlEscape(v.macEtiketi||v.macId||'—')}</td><td>${htmlEscape(v.okul||'—')}<br><b>${htmlEscape(v.ogrenci||'—')}</b> · ${htmlEscape(v.taraf||'—')}</td><td>${htmlEscape(v.juri||'—')}<br>${htmlEscape(v.juriAd||'')}</td><td style="font-weight:800;color:${color}">${htmlEscape(state)}</td><td>${evetHayir(v.sifirlamaKullanildi)}</td><td style="min-width:260px;white-space:normal">${htmlEscape(details||v.hata||'—')}</td></tr>`;
@@ -2601,6 +2645,13 @@ Devam edilsin mi?`)){
             localUpdatedAt: yerelZaman,
             version: 3
         };
+        // Tam 13 kriterli puan, ilk Firebase ağ çağrısından önce yerel kuyruğa kopyalanır.
+        const puanKuyrukItem={
+            kategori:secimler.kategori,macId:mac.id,kayitId,
+            kayit:{...kayitTemel,createdAt:yerelZaman,updatedAt:yerelZaman,queuedOffline:true},
+            taslakYolu:aktifPuanTaslak?.cloudPath,taslakYerelAnahtari:aktifPuanTaslak?.localKey,
+            queueStatus:'gonderim_on_kontrol',gonderimBaslatmaAt:yerelZaman
+        };
         let puanKayitRef=null;
         let firebaseYazmaDenendi=false;
         let firebaseKaydiDogrulandi=false;
@@ -2609,10 +2660,18 @@ Devam edilsin mi?`)){
         });
 
         try {
+            const kaliciKuyrukKaydi=puaniKuyrugaEkle(puanKuyrukItem);
+            Object.assign(puanKuyrukItem,kaliciKuyrukKaydi||{});
+            await juriSureOturumLogunuGuncelle({
+                durum:'puan_gonderimi_baslatildi',islem:'puan_kayit_aktarimi',
+                hata:'13 kriterli puan gönderimi başladı; Firebase geri okuma doğrulaması bekleniyor.',
+                kayitId,puanKayitId:kayitId,puanVerisi:{...kayitTemel.puanlar},
+                puanGonderildi:false,puanKuyrugaAlindi:true,aktarimBaslatildiClientAt:yerelZaman
+            });
             if (!navigator.onLine || !firebaseBagli) {
-                puaniKuyrugaEkle({ kategori:secimler.kategori, macId:mac.id, kayitId, kayit:{...kayitTemel, createdAt:yerelZaman, updatedAt:yerelZaman, queuedOffline:true},
-                    taslakYolu:aktifPuanTaslak?.cloudPath,taslakYerelAnahtari:aktifPuanTaslak?.localKey });
-                await juriSureOturumLogunuGuncelle({durum:'puanlar_kuyruga_alindi',puanGonderildi:false,puanKuyrugaAlindi:true,puanGondermeAniClient:puanGondermeAni});
+                puaniKuyrugaEkle({...puanKuyrukItem,queueStatus:'bekliyor'});
+                await juriSureOturumLogunuGuncelle({durum:'puanlar_kuyruga_alindi',puanGonderildi:false,puanKuyrugaAlindi:true,
+                    puanVerisi:{...kayitTemel.puanlar},kayitId,puanKayitId:kayitId,puanGondermeAniClient:puanGondermeAni});
                 alert('İnternet bağlantısı yok. Puan bu cihazda kuyruğa alındı; bağlantı gelince gönderilecek. Ortak sayaç değiştirilmeyecek.');
                 secimler.ogr = '';
                 secimleriKaydet();
@@ -2622,10 +2681,23 @@ Devam edilsin mi?`)){
             await ensureMatchExists(secimler.kategori, mac.hukOkul, mac.muhOkul);
             const m = await macDurumuGetir(secimler.kategori, mac.id);
             if (['kapali','iptal'].includes(m?.durum)) {
-                await juriSureOturumLogunuGuncelle({durum:'puan_gonderme_engellendi_mac_kapali',
-                    hata:'Maç kapatılmış veya iptal edilmiş olduğu için jüri puanı gönderilmedi.',
-                    puanGonderildi:false,kayitId}).catch(logErr=>console.warn('Kapalı maç engeli günlüğü yazılamadı:',logErr));
-                return alert('Bu maç kapatılmış veya iptal edilmiştir. Puan gönderilmedi; durum yönetici günlüğüne bildirildi.');
+                const neden=m.durum==='iptal'
+                    ?'Maç iptal edilmiş olduğu için jüri puanı resmî puan tablosuna alınmadı.'
+                    :'Maç daha önce kapatılmış olduğu için jüri puanı resmî puan tablosuna alınmadı.';
+                try{
+                    await puanReddedilenKaydiniArsivle(puanKuyrukItem,neden,'puan_mac_kapali_arsivlendi');
+                    puanKuyrugundanSil(secimler.kategori,kayitId);
+                    await juriSureOturumLogunuGuncelle({durum:'puan_mac_kapali_arsivlendi',hata:neden,
+                        puanVerisi:{...kayitTemel.puanlar},kayitId,puanGonderildi:false,reddedilenPuanArsivlendi:true});
+                    alert('Maç kapalı/iptal olduğu için puan resmî sonuca eklenmedi. Girilen 13 kriter Firebase arşivine kaydedildi ve yönetici incelemesine açıldı.');
+                }catch(arsivErr){
+                    puanKuyrukDurumunuGuncelle(secimler.kategori,kayitId,{queueStatus:'mac_kapali_arsiv_bekliyor',
+                        officialSendAllowed:false,reddedilmeNedeni:neden,lastError:String(arsivErr?.message||arsivErr)});
+                    await juriSureOturumLogunuGuncelle({durum:'puan_mac_kapali_arsiv_hatasi',hata:String(arsivErr?.message||arsivErr),
+                        puanVerisi:{...kayitTemel.puanlar},kayitId,puanGonderildi:false});
+                    alert('Maç kapalı/iptal olduğu için puan resmî sonuca eklenmedi. Arşiv aktarımı şu an tamamlanamadı; 13 kriter bu cihazın kuyruğunda korundu. Yöneticiyle kontrol edin.');
+                }
+                return;
             }
 
             // Her jüri, kendi deterministik puan kayıt anahtarına yazar. Bütün kategori
@@ -2636,7 +2708,13 @@ Devam edilsin mi?`)){
             if(onceki){
                 const ogrAd=(secimler.ogr||'').split(' (')[0];
                 const onay=confirm(`${oturum.juri} tarafından ${ogrAd} için daha önce puan gönderilmiş.\n\nYalnızca bu jüriye ait önceki kayıt güncellenecek. Devam edilsin mi?`);
-                if(!onay)return;
+                if(!onay){
+                    puanKuyrugundanSil(secimler.kategori,kayitId);
+                    await juriSureOturumLogunuGuncelle({durum:'puan_gonderimi_iptal_edildi',
+                        hata:'Jüri önceki puanı güncelleme onayını vermedi; yeni gönderim iptal edildi.',
+                        kayitId,puanGonderildi:false});
+                    return;
+                }
             }
             const kayit = {
                 ...kayitTemel,
@@ -2655,7 +2733,24 @@ Devam edilsin mi?`)){
                     izinVerilenEkSureSaniye:ORTAK_PUAN_EK_SURE})).catch(e=>console.warn('Son kontrol günlüğü yazılamadı:',e));
                 await juriSureOturumLogunuGuncelle({durum:'puan_gonderme_engellendi_sure_asimi',puanGonderildi:false,
                     puanGondermeEngelNedeni:'Firebase son kontrolünde 10 saniyelik pencere doldu.'});
-                alert('Firebase üzerindeki son kontrol, puanlama süresinin dolduğunu gösterdi. Puan kaydedilmedi. Gerekliyse ortak süreyi sıfırlayıp yeniden puanlayın.');
+                const sureNedeni='Firebase üzerindeki son kontrol, ortak puanlama penceresinin dolduğunu gösterdi. Puan resmî tabloya alınmadı.';
+                try{
+                    puanKuyrukDurumunuGuncelle(secimler.kategori,kayitId,{queueStatus:'sure_engeli_arsiv_bekliyor',
+                        officialSendAllowed:false,reddedilmeNedeni:sureNedeni});
+                    puanKuyrukItem.queueStatus='sure_engeli_arsiv_bekliyor';puanKuyrukItem.officialSendAllowed=false;
+                    puanKuyrukItem.reddedilmeNedeni=sureNedeni;
+                    await puanReddedilenKaydiniArsivle(puanKuyrukItem,sureNedeni,'puan_sure_engeli_arsivlendi');
+                    puanKuyrugundanSil(secimler.kategori,kayitId);
+                    await juriSureOturumLogunuGuncelle({durum:'puan_sure_engeli_arsivlendi',hata:sureNedeni,
+                        puanVerisi:{...kayitTemel.puanlar},kayitId,puanGonderildi:false,reddedilenPuanArsivlendi:true});
+                    alert('Puanlama süresi dolduğu için resmî puan kaydı yapılmadı. Girilen kriterler yönetici incelemesi için arşivlendi. Gerekliyse süre sıfırlamasıyla yeniden puanlayın.');
+                }catch(arsivErr){
+                    puanKuyrukDurumunuGuncelle(secimler.kategori,kayitId,{queueStatus:'sure_engeli_arsiv_bekliyor',
+                        officialSendAllowed:false,reddedilmeNedeni:sureNedeni,lastError:String(arsivErr?.message||arsivErr)});
+                    await juriSureOturumLogunuGuncelle({durum:'puan_sure_engeli_arsiv_hatasi',hata:String(arsivErr?.message||arsivErr),
+                        puanVerisi:{...kayitTemel.puanlar},kayitId,puanGonderildi:false});
+                    alert('Puanlama süresi dolduğu için resmî kayda eklenmedi. Arşiv aktarımı tamamlanamadı; 13 kriter kuyrukta korundu.');
+                }
                 return;
             }
             aktifOrtakSureVerisi=sonTimer;
@@ -2666,6 +2761,7 @@ Devam edilsin mi?`)){
             const puanDogrulama=await firebasePuanKaydiniDogrula(puanKayitRef,kayit);
             if(!puanDogrulama.ok)throw new Error('Firebase yazımından sonra puan kaydı geri okundu ancak jüri/öğrenci/13 kriter doğrulaması eşleşmedi. Puan gönderildi kabul edilmedi.');
             firebaseKaydiDogrulandi=true;
+            puanKuyrugundanSil(secimler.kategori,kayitId);
             puanFirebaseDurumuYaz('success',`✓ ${oturum.juri} · ${secimler.ogr}: 13/13 kriter Firebase’den geri okunarak doğrulandı.`,{
                 kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
             });
@@ -2711,6 +2807,11 @@ Devam edilsin mi?`)){
                 secimleriKaydet();
                 renderPuanlamaSecim(mac.id);
             }else if(code.includes('permission')){
+                puanKuyrukDurumunuGuncelle(secimler.kategori,kayitId,{queueStatus:'yetki_hatasi',lastError:String(err?.message||err)});
+                await juriSureOturumLogunuGuncelle({durum:'puan_kayit_yetki_hatasi',
+                    hata:'Firebase erişim yetkisi puan kaydını reddetti. Puan yerel gönderim kuyruğunda korundu.',
+                    firebaseHatasiKodu:code,puanVerisi:{...kayitTemel.puanlar},puanGonderildi:false,
+                    puanKuyrugaAlindi:true,kayitId});
                 puanFirebaseDurumuYaz('error','⛔ Firebase puan yazımına izin vermedi. Puan gönderilmedi; 13 kriterli taslak bu cihazda korundu. Yetki sorunu çözülmeden bu kaydı gönderildi kabul etmeyin.',{
                     kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
                 });
@@ -2718,14 +2819,14 @@ Devam edilsin mi?`)){
                 alert('Firebase erişim yetkisi puan kaydını reddetti. Puan Firebase’e kaydedilmedi. Taslak bu ekranda ve cihazda korunuyor; yönetici günlüğüne hata bildirildi.');
             }else{
                 try{
-                    puaniKuyrugaEkle({kategori:secimler.kategori,macId:mac.id,kayitId,
-                        kayit:{...kayitTemel,createdAt:yerelZaman,updatedAt:yerelZaman,queuedOffline:true}});
+                    puanKuyrukDurumunuGuncelle(secimler.kategori,kayitId,{queueStatus:'dogrulama_bekliyor',
+                        kayit:{...kayitTemel,createdAt:yerelZaman,updatedAt:yerelZaman,queuedOffline:true},lastError:String(err?.message||err)});
                     await juriSureOturumLogunuGuncelle({durum:'puanlar_kuyruga_alindi_hata',puanGonderildi:false,puanKuyrugaAlindi:true,
-                        puanKuyrukHatasi:String(err?.message||err),puanGondermeAniClient:puanGondermeAni}).catch(logErr=>console.warn('Kuyruk günlüğü yazılamadı:',logErr));
+                        puanVerisi:{...kayitTemel.puanlar},kayitId,puanKuyrukHatasi:String(err?.message||err),puanGondermeAniClient:puanGondermeAni}).catch(logErr=>console.warn('Kuyruk günlüğü yazılamadı:',logErr));
                     puanFirebaseDurumuYaz('queued','⚠ Firebase kaydı geri okunarak doğrulanamadı. Puan bu cihazın kuyruğunda korundu; gönderildi kabul edilmedi. Bağlantı gelince yeniden denenecek.',{
                         kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
                     });
-                    alert('Puan Firebase’de doğrulanamadı. Bu cihazın kuyruğunda ve taslakta korundu; gönderildi kabul edilmedi. İnternet geldiğinde yeniden denenecek.');
+                    alert('Puan Firebase’de doğrulanamadı. 13 kriter yerel gönderim kuyruğunda ve taslakta korundu; gönderildi kabul edilmedi. İnternet geldiğinde yeniden denenecek.');
                 }catch(queueErr){
                     console.error('Yerel puan kuyruğu da yazılamadı:',queueErr);
                     puanFirebaseDurumuYaz('error','⛔ Firebase kaydı doğrulanamadı ve yerel kuyruk da yazılamadı. Puanlama ekranını kapatmayın; seçili 13 kriter hâlâ ekranda. Bağlantı/yetki kontrolü yapın.',{
@@ -3440,12 +3541,29 @@ Devam edilsin mi?`)){
         const durum=String(v?.durum||'').toLocaleLowerCase('tr-TR');
         if(durum.startsWith('puanlar_gonderildi')||durum==='basarili'||durum==='uygulandi')return false;
         return durum.includes('engellendi')||durum.includes('hata')||durum.includes('kuyru')||
-            durum.includes('dogrulanamadi')||durum.includes('basarisiz')||durum.includes('kayit_cakismasi');
+            durum.includes('dogrulanamadi')||durum.includes('basarisiz')||durum.includes('kayit_cakismasi')||
+            durum.includes('gonderim_baslatildi')||durum.includes('aktarim_bekliyor')||durum.includes('arsivlendi');
     }
     function canliPuanAktarimUyarilariniCiz(kayitlar) {
         const host=document.getElementById('puanAktarimSorunlari');
         if(!host)return;
-        const sorunlar=(kayitlar||[]).filter(puanAktarimSorunuMu)
+        const birlesik=new Map();
+        (kayitlar||[]).forEach((v,i)=>birlesik.set(String(v.kayitId||v.puanKayitId||v.logId||('audit_'+i)),v));
+        // Aynı tarayıcıdaki yerel gönderim kuyruğu, bulut günlüğü ulaşmamış olsa da görünür.
+        Object.values(offlineKuyrukGetir()).forEach(item=>{
+            const sec=item?.kayit?.secim||{},id=String(item?.kayitId||item?.kayit?.kayitId||'');
+            const onceki=birlesik.get(id)||{};
+            birlesik.set(id,{
+                ...onceki,kategori:item.kategori,macId:item.macId,
+                macEtiketi:item.kayit?.macEtiketi||item.kayit?.mac||onceki.macEtiketi,
+                okul:sec.okul||onceki.okul,ogrenci:String(sec.ogr||'').split(' (')[0]||onceki.ogrenci,
+                juri:sec.juri||onceki.juri,taraf:sec.taraf||onceki.taraf,
+                durum:'yerel_puan_kuyruk_'+String(item.queueStatus||'bekliyor'),
+                hata:item.lastError||onceki.hata,puanVerisi:item.kayit?.puanlar||onceki.puanVerisi,
+                kayitId:id,localOnly:true,queueStatus:item.queueStatus,queuedAt:item.queuedAt
+            });
+        });
+        const sorunlar=Array.from(birlesik.values()).filter(puanAktarimSorunuMu)
             .sort((a,b)=>Number(b.updatedAt||b.createdAt||b.clientAt||b.updatedClientAt||0)-
                          Number(a.updatedAt||a.createdAt||a.clientAt||a.updatedClientAt||0));
         if(!sorunlar.length){
@@ -3460,11 +3578,14 @@ Devam edilsin mi?`)){
                 (durum.includes('kuyru')?'Puan Firebase’de doğrulanmadı; kuyrukta bekliyor.':'Yönetici kontrolü gerekiyor.');
             const mac=v.macEtiketi||v.macId||'Maç bilgisi yok';
             const kisi=[v.okul,v.ogrenci].filter(Boolean).join(' · ')||'Öğrenci bilgisi yok';
-            return '<tr><td style="white-space:nowrap">'+htmlEscape(tarih)+'</td><td>'+htmlEscape(mac)+'</td><td>'+htmlEscape(kisi)+'</td><td>'+htmlEscape(v.juri||v.juriAd||'—')+'</td><td style="font-weight:800;color:#fca5a5">'+htmlEscape(durum)+'</td><td style="min-width:260px;white-space:normal">'+htmlEscape(aciklama)+'</td></tr>';
+            const ham=v.puanVerisi||v.puanlar||{};
+            const puanDizisi=Array.from({length:13},(_,i)=>ham[i]??ham[String(i)]??'—');
+            const puanMetni=puanDizisi.every(x=>x==='—')?'—':puanDizisi.join(' / ');
+            return '<tr><td style="white-space:nowrap">'+htmlEscape(tarih)+'</td><td>'+htmlEscape(mac)+'</td><td>'+htmlEscape(kisi)+'</td><td>'+htmlEscape(v.juri||v.juriAd||'—')+'</td><td style="font-weight:800;color:#fca5a5">'+htmlEscape(durum)+'</td><td>'+htmlEscape(v.localOnly?'Bu cihaz':'Firebase')+'</td><td style="min-width:230px;white-space:normal">'+htmlEscape(puanMetni)+'</td><td style="min-width:260px;white-space:normal">'+htmlEscape(aciklama)+'</td></tr>';
         }).join('');
         host.innerHTML='<h3 style="margin:0 0 8px;color:#fca5a5;">⚠ Jüri Puan Aktarımı · '+sorunlar.length+' bildirim</h3>'+
-            '<div class="puanlama-bilgi hata">Bu kayıtlar Firebase’e başarıyla kaydedilmiş ve doğrulanmış puanlar değildir. Maç sonuçlandırılmadan önce aşağıdaki kayıtları kontrol edin.</div>'+
-            '<div style="overflow:auto"><table class="tutanak-table" style="min-width:900px"><thead><tr><th>Tarih</th><th>Maç</th><th>Okul / Öğrenci</th><th>Jüri</th><th>Durum</th><th>Ayrıntı</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+            '<div class="puanlama-bilgi hata">Bu kayıtlar resmî puan tablosunda onaylanmış kayıtlar değildir. Arşivlenen ret kayıtları ayrıca saklanır. “Bu cihaz” kaynaklı kayıtlar yalnızca bu tarayıcıdaki yerel kuyruktan okunur; diğer jüri cihazları çevrimdışıyken burada görünemez. Maç sonuçlandırılmadan önce aşağıdaki kayıtları kontrol edin.</div>'+
+            '<div style="overflow:auto"><table class="tutanak-table" style="min-width:1250px"><thead><tr><th>Tarih</th><th>Maç</th><th>Okul / Öğrenci</th><th>Jüri</th><th>Durum</th><th>Kaynak</th><th>13 Kriter</th><th>Ayrıntı</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
             (sorunlar.length>12?'<div class="sure-hint">İlk 12 kayıt gösteriliyor. Ayrıntılar için Jüri / Süre İşlem Günlüğü bölümünü açın.</div>':'');
     }
 
