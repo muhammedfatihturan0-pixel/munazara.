@@ -71,7 +71,7 @@
     function juriCanliJuriKartiniCiz(slot,label,record){
         const r=record||{};
         const lastSeen=Number(r.lastSeenAt||r.lastSeenClientAt||0);
-        const stale=!lastSeen||(Date.now()-lastSeen)>65000;
+        const stale=!lastSeen||(Date.now()-lastSeen)>75000;
         const online=!!r.online&&!stale;
         const pending=Number(r.pendingCount||0);
         const lastStatus=String(r.lastScoreStatus||'');
@@ -108,7 +108,7 @@
             {key:'juri3',label:'3. Jüri'}
         ];
         const records=seats.map(x=>data?.[x.key]||null);
-        const online=records.filter(r=>r&&r.online&&Number(r.lastSeenAt||r.lastSeenClientAt)&&Date.now()-Number(r.lastSeenAt||r.lastSeenClientAt)<=65000).length;
+        const online=records.filter(r=>r&&r.online&&Number(r.lastSeenAt||r.lastSeenClientAt)&&Date.now()-Number(r.lastSeenAt||r.lastSeenClientAt)<=75000).length;
         const pending=records.reduce((n,r)=>n+Number(r?.pendingCount||0),0);
         const errors=records.filter(r=>r&&(r.lastScoreStatus==='error'||Number(r.pendingCount||0)>0)).length;
         summary.innerHTML='<div class="admin-jury-summary-stat"><b>'+online+'/3</b><span>Bağlı jüri</span></div>'+
@@ -128,10 +128,21 @@
         const ref=db.ref(JURI_CANLI_DURUM_YOLU+'/'+gun+'/'+kategori);
         aktifJuriCanliDurumMonitorRef=ref;
         aktifCanliPanelRefs.push(ref);
-        ref.on('value',snap=>juriCanliTakipVerisiniCiz(snap.val()||{},gun,kategori),err=>{
+        let sonVeri={};
+        ref.on('value',snap=>{
+            sonVeri=snap.val()||{};
+            juriCanliTakipVerisiniCiz(sonVeri,gun,kategori);
+        },err=>{
             const target=document.getElementById('juriCanliTakipHost');
             if(target)target.innerHTML='<div class="admin-jury-monitor-error">Jüri durumları okunamadı: '+htmlEscape(err?.message||err)+'. Firebase okuma izinlerini kontrol edin.</div>';
         });
+        if(juriCanliTakipYenileTick)clearInterval(juriCanliTakipYenileTick);
+        juriCanliTakipYenileTick=setInterval(()=>{
+            if(!document.getElementById('juriCanliTakipHost')){
+                clearInterval(juriCanliTakipYenileTick);juriCanliTakipYenileTick=null;return;
+            }
+            juriCanliTakipVerisiniCiz(sonVeri,gun,kategori);
+        },10000);
     }
     
     function canliResmiMacSonucu(fiksturNo, kategori){
