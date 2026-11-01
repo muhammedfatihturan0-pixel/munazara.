@@ -919,6 +919,46 @@
                         await puanReddedilenKaydiniArsivle(item,neden,'puan_mac_kapali_arsivlendi');
                         delete q[key];degisti=true;continue;
                     }
+                    // Gönderim çevrimdışıyken yapıldıysa, yeniden bağlanma anı değil jüri tıklama anı ölçülür.
+                    if(item.queueStatus==='sure_dogrulama_bekliyor')continue;
+                    const sec=item.kayit?.secim||{};
+                    const timerId=ortakSureKimligi(sec.okul,(sec.ogr||'').split(' (')[0]);
+                    const timerSnap=await db.ref('maclar/'+item.kategori+'/'+item.macId+'/konusmaSayaclari/'+timerId).once('value');
+                    const timer=timerSnap.val();
+                    const bas=Number(timer?.baslangicAt||0);
+                    const clickAt=Number(item.puanGondermeAni||item.kayit?.puanGondermeAni||
+                        ((Number(item.kayit?.localUpdatedAt||0)+Number(item.serverTimeOffsetAtClick||item.kayit?.serverTimeOffsetAtClick||0)))||
+                        item.queuedAt||0);
+                    if(!bas||!clickAt||clickAt<bas){
+                        const neden='Ortak sayaç veya jüri gönderim anı doğrulanamadı. 13 kriter resmî puana aktarılmadı; yönetici incelemesi için güvenli kuyrukta bekliyor.';
+                        q[key].queueStatus='sure_dogrulama_bekliyor';
+                        q[key].lastError=neden;degisti=true;offlineKuyrukKaydet(q);
+                        try{
+                            const base='arsiv/juriPuanYedekleri/'+item.kategori+'/'+item.macId+'/'+item.kayitId;
+                            const data={...item.kayit,queueStatus:'sure_dogrulama_bekliyor',beklemeNedeni:neden,
+                                yedekAt:firebase.database.ServerValue.TIMESTAMP,yedekOlayi:'juri_puani_sure_dogrulama_bekliyor'};
+                            await db.ref(base+'/bekleyen').set(data);
+                            await db.ref(base+'/gecmis/'+String(clickAt||Date.now())+'_sure_dogrulama_bekliyor').set(data);
+                        }catch(backupErr){
+                            q[key].lastError=neden+' · Bulut arşiv hatası: '+String(backupErr?.message||backupErr);
+                            offlineKuyrukKaydet(q);
+                        }
+                        await puanAktarimDenetiminiGuncelle(item,{
+                            durum:'puan_sure_dogrulama_bekliyor',hata:q[key].lastError,
+                            queueStatus:'sure_dogrulama_bekliyor',puanVerisi:{...(item.kayit?.puanlar||{})},
+                            puanGonderildi:false,puanKuyrugaAlindi:true
+                        });
+                        continue;
+                    }
+                    if(clickAt>bas+(ORTAK_SURE_LIMIT+ORTAK_PUAN_EK_SURE)*1000){
+                        const neden='Jüri puanı, 6 dakika + 1 dakikalık ek gönderim penceresinden sonra girmiş. Resmî puana eklenmedi; 13 kriter arşivlendi.';
+                        q[key].queueStatus='sure_engeli_arsiv_bekliyor';
+                        q[key].officialSendAllowed=false;
+                        q[key].reddedilmeNedeni=neden;degisti=true;offlineKuyrukKaydet(q);
+                        await puanReddedilenKaydiniArsivle(item,neden,'puan_sure_engeli_arsivlendi');
+                        delete q[key];degisti=true;offlineKuyrukKaydet(q);
+                        continue;
+                    }
                     const rec = { ...item.kayit, serverSyncedAt: firebase.database.ServerValue.TIMESTAMP, offlineSynced: true };
                     const puanRef=db.ref(`puanlar/${item.kategori}/${item.kayitId}`);
                     // Aynı jüri daha sonra yeni puan gönderdiyse eski kuyruk kaydı yenisini ezemez.
