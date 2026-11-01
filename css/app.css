@@ -590,3 +590,72 @@ body { padding-top: 72px; }
  .puanlama-action-bar {grid-template-columns:1fr 1fr;}
  .puanlama-action-bar #btnPuanGonder {font-size:10px;}
 }
+
+/* 3.41 — Merkezi üç jüri tableti canlı izleme ekranı */
+.admin-jury-monitor-page {max-width:1240px !important;margin:28px auto 36px;padding:clamp(15px,2vw,26px);}
+.admin-jury-monitor-head {display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:19px;}
+.admin-jury-monitor-head h2 {margin:0 0 6px;padding:0;border:0;color:#f1f5f9;font-size:clamp(21px,2.6vw,28px);}
+.admin-jury-monitor-head p {margin:0;color:#9eb2c9;font-size:12px;line-height:1.5;max-width:670px;}
+.admin-jury-monitor-live {display:inline-flex;align-items:center;gap:8px;flex:0 0 auto;padding:8px 11px;border:1px solid #24694a;border-radius:999px;background:rgba(20,83,45,.2);color:#a7f3d0;font-size:10px;font-weight:800;white-space:nowrap;}
+.admin-jury-monitor-live i {width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.13);}
+.admin-jury-monitor-filters {display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:16px;padding:13px;border:1px solid #30465f;border-radius:12px;background:#101f33;}
+.admin-jury-monitor-filters label {display:flex;flex-direction:column;gap:5px;min-width:170px;color:#9fb4ca;font-size:10px;font-weight:750;}
+.admin-jury-monitor-filters input,.admin-jury-monitor-filters select {min-height:40px;padding:7px 10px;border:1px solid #405a76;border-radius:8px;background:#0b192b;color:#e2e8f0;font-size:12px;}
+.admin-jury-monitor-filters button {min-height:40px;padding:8px 13px;border:1px solid #4777a8;border-radius:8px;background:#193b60;color:#eaf4ff;font-size:11px;font-weight:800;cursor:pointer;}
+.admin-jury-monitor-summary {display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;gap:9px;margin-bottom:13px;}
+.admin-jury-summary-stat {display:flex;align-items:center;gap:10px;min-height:59px;padding:10px 13px;border:1px solid #334b68;border-radius:11px;background:#11243a;}
+.admin-jury-summary-stat b {color:#f8fafc;font-size:20px;font-variant-numeric:tabular-nums;}
+.admin-jury-summary-stat span {color:#9fb4ca;font-size:10px;line-height:1.35;}
+.admin-jury-summary-note {display:flex;align-items:center;justify-content:flex-end;color:#8ca4bf;font-size:10px;white-space:nowrap;padding:0 4px;}
+.admin-jury-monitor-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:stretch;}
+.admin-jury-device-card {min-width:0;padding:14px;border:1px solid #344b64;border-radius:14px;background:linear-gradient(150deg,#13263c,#0f1d30);box-shadow:0 8px 20px rgba(0,0,0,.14);}
+.admin-jury-device-card.is-online {border-top:3px solid #22c55e;}
+.admin-jury-device-card.is-offline {border-top:3px solid #64748b;}
+.admin-jury-device-card > header {display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:13px;}
+.admin-jury-device-seat {display:flex;align-items:center;gap:9px;min-width:0;}
+.admin-jury-device-seat > span {display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;border:1px solid #42658a;border-radius:10px;background:#193a5c;color:#dbeafe;font-size:13px;font-weight:850;}
+.admin-jury-device-seat > div {display:flex;flex-direction:column;gap:3px;min-width:0;}
+.admin-jury-device-seat b {color:#f1f5f9;font-size:13px;}
+.admin-jury-device-seat small {color:#91a8c1;font-size:9px;line-height:1.3;}
+.admin-jury-status-pill {display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;padding:5px 7px;border:1px solid #475569;border-radius:999px;background:#1e293b;color:#cbd5e1;font-size:9px;font-weight:800;white-space:nowrap;}
+.admin-jury-status-pill i {width:6px;height:6px;border-radius:50%;background:#94a3b8;}
+.admin-jury-status-pill.online {border-color:#1f704a;background:rgba(20,83,45,.24);color:#a7f3d0;}
+.admin-jury-status-pill.online i {background:#22c55e;}
+.admin-jury-status-pill.offline {border-color:#475569;background:rgba(51,65,85,.35);color:#cbd5e1;}
+.admin-jury-status-pill.offline i {background:#94a3b8;}
+.admin-jury-device-identity {margin-bottom:9px;color:#e2e8f0;font-size:12px;font-weight:750;overflow-wrap:anywhere;}
+.admin-jury-device-state {display:inline-flex;margin-bottom:10px;padding:5px 8px;border:1px solid #475569;border-radius:7px;background:#1e293b;color:#cbd5e1;font-size:10px;font-weight:800;}
+.admin-jury-device-state.state-success {border-color:#216b49;background:rgba(20,83,45,.22);color:#86efac;}
+.admin-jury-device-state.state-warning {border-color:#8a641b;background:rgba(120,74,8,.22);color:#fcd34d;}
+.admin-jury-device-state.state-error {border-color:#923b3b;background:rgba(127,29,29,.22);color:#fecaca;}
+.admin-jury-device-detail {display:flex;justify-content:space-between;gap:9px;padding:7px 0;border-top:1px solid rgba(71,85,105,.42);}
+.admin-jury-device-detail span {flex:0 0 94px;color:#8ea4bc;font-size:9px;}
+.admin-jury-device-detail b {min-width:0;color:#d8e5f2;font-size:10px;text-align:right;overflow-wrap:anywhere;}
+.admin-jury-device-detail .text-warning {color:#fbbf24;}
+.admin-jury-device-last {margin-top:8px;padding:10px;border:1px solid #344b64;border-radius:9px;background:rgba(8,20,35,.55);}
+.admin-jury-device-last b {display:block;color:#b9cee4;font-size:9px;}
+.admin-jury-device-last p {margin:5px 0 0;color:#91a8c1;font-size:9px;line-height:1.45;overflow-wrap:anywhere;}
+.admin-jury-device-card > footer {display:flex;justify-content:space-between;gap:8px;margin-top:10px;color:#7188a1;font-size:8px;overflow-wrap:anywhere;}
+.admin-jury-monitor-empty,.admin-jury-monitor-error {grid-column:1/-1;padding:18px;border:1px dashed #405a76;border-radius:11px;background:#101f33;color:#a9bdd2;font-size:11px;line-height:1.5;}
+.admin-jury-monitor-error {border-color:#8e4545;color:#fecaca;}
+.admin-jury-monitor-foot {margin-top:14px;padding:10px 12px;border-left:3px solid #4777a8;border-radius:7px;background:rgba(18,44,70,.38);color:#91a8c1;font-size:9px;line-height:1.5;}
+.admin-jury-monitor-actions {display:flex;gap:9px;flex-wrap:wrap;margin-top:14px;}
+.admin-jury-monitor-actions .btn {width:auto;min-width:150px;margin:0;padding:9px 13px;font-size:11px;}
+@media (max-width:1050px) {
+ .admin-jury-monitor-grid {grid-template-columns:repeat(2,minmax(0,1fr));}
+ .admin-jury-monitor-summary {grid-template-columns:repeat(3,minmax(0,1fr));}
+ .admin-jury-summary-note {grid-column:1/-1;justify-content:flex-start;}
+}
+@media (max-width:680px) {
+ .admin-jury-monitor-page {margin:14px auto 25px;padding:12px;}
+ .admin-jury-monitor-head {flex-direction:column;gap:10px;}
+ .admin-jury-monitor-filters {align-items:stretch;flex-direction:column;}
+ .admin-jury-monitor-filters label {min-width:0;width:100%;}
+ .admin-jury-monitor-filters button {width:100%;}
+ .admin-jury-monitor-summary {grid-template-columns:1fr 1fr;}
+ .admin-jury-summary-stat:last-of-type {grid-column:1/-1;}
+ .admin-jury-monitor-grid {grid-template-columns:1fr;}
+ .admin-jury-device-card {padding:13px;}
+ .admin-jury-monitor-actions {flex-direction:column;}
+ .admin-jury-monitor-actions .btn {width:100%;}
+}
