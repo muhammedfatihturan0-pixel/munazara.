@@ -1559,8 +1559,9 @@ Devam edilsin mi?`)){
             }
         } finally {
             puanGonderiliyor = false;
+            puanlamaIlerlemesiniGuncelle();
             const yeniBtn = document.getElementById('btnPuanGonder');
-            if (yeniBtn) { yeniBtn.innerText = 'Puanları Gönder ✓'; ortakPuanArayuzunuGuncelle(); }
+            if (yeniBtn) { ortakPuanArayuzunuGuncelle(); }
         }
     }
 
