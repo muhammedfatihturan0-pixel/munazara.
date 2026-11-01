@@ -1,5 +1,5 @@
 
-    const APP_VERSION = '3.36 · 1 Dakika Ek Süre ve Puan Güvencesi';
+    const APP_VERSION = '3.37 · Kalıcı Puan Durumu ve Jüri Geçmişi';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -423,56 +423,181 @@
     function offlineKuyrukGetir() {
         try { return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '{}') || {}; } catch (_) { return {}; }
     }
+
     const PUAN_FIREBASE_DURUM_KEY='munazaraPuanFirebaseDurumV1';
     let puanFirebaseAnlikDurum=null;
-
     function puanFirebaseDurumuOku(){
         try{return JSON.parse(localStorage.getItem(PUAN_FIREBASE_DURUM_KEY)||'null');}catch(_){return null;}
     }
     function puanFirebaseDurumuYaz(durum,mesaj,meta={}){
+        const oturum=juriOturumuGetir();
         const kayit={durum,mesaj,kayitId:meta.kayitId||'',macId:meta.macId||'',ogr:meta.ogr||'',
-            juri:meta.juri||juriOturumuGetir()?.juri||'',updatedAt:Date.now()};
+            juri:meta.juri||oturum?.juri||'',juriAd:meta.juriAd||oturum?.ad||'',updatedAt:Date.now()};
         puanFirebaseAnlikDurum=kayit;
-        try{
-            if(durum==='success'){
-                const onceki=puanFirebaseDurumuOku();
-                if(onceki&&(!kayit.kayitId||onceki.kayitId===kayit.kayitId))localStorage.removeItem(PUAN_FIREBASE_DURUM_KEY);
-            }else localStorage.setItem(PUAN_FIREBASE_DURUM_KEY,JSON.stringify(kayit));
-        }catch(_){}
+        try{localStorage.setItem(PUAN_FIREBASE_DURUM_KEY,JSON.stringify(kayit));}
+        catch(err){console.warn('Son puan gönderim durumu cihazda saklanamadı:',err);}
         puanFirebaseDurumuGoster();
     }
     function puanFirebaseDurumunuTemizle(kayitId=''){
-        try{
-            const old=puanFirebaseDurumuOku();
-            if(!kayitId||!old?.kayitId||old.kayitId===kayitId)localStorage.removeItem(PUAN_FIREBASE_DURUM_KEY);
-        }catch(_){}
+        try{const old=puanFirebaseDurumuOku();if(!kayitId||!old?.kayitId||old.kayitId===kayitId)localStorage.removeItem(PUAN_FIREBASE_DURUM_KEY);}catch(_){}
         if(!kayitId||puanFirebaseAnlikDurum?.kayitId===kayitId)puanFirebaseAnlikDurum=null;
         puanFirebaseDurumuGoster();
     }
+    function puanDurumTarihiYaz(ts){
+        const n=Number(ts||0);return n?new Date(n).toLocaleString('tr-TR'):'Tarih bilgisi yok';
+    }
+    function puanDurumOzetMetni(){
+        const pending=Object.values(offlineKuyrukGetir()).filter(x=>x&&x.kayit);
+        const durum=puanFirebaseAnlikDurum||puanFirebaseDurumuOku();
+        if(pending.length){
+            const problem=pending.some(x=>['yetki_hatasi','mac_kapali','mac_iptal','sure_engeli_arsiv_bekliyor'].includes(x.queueStatus)||x.lastError);
+            return (problem?'Dikkat: ':'Bekleyen: ')+pending.length+' puan Firebase’de henüz doğrulanmadı.';
+        }
+        if(durum?.mesaj)return String(durum.mesaj)+' ('+puanDurumTarihiYaz(durum.updatedAt)+')';
+        return 'Bu cihazda bekleyen puan yok. Henüz doğrulanmış bir gönderim bilgisi bulunmuyor.';
+    }
+    function puanDurumPaneliniKur(){
+        if(!document.body)return null;
+        let el=document.getElementById('puanGuvenceBar');
+        if(!el){el=document.createElement('section');el.id='puanGuvenceBar';el.className='puan-guvence-bar';el.setAttribute('aria-live','polite');document.body.prepend(el);}
+        return el;
+    }
+    function puanDurumPaneliniGuncelle(){
+        const bar=puanDurumPaneliniKur();
+        const pending=Object.values(offlineKuyrukGetir()).filter(x=>x&&x.kayit);
+        const durum=puanFirebaseAnlikDurum||puanFirebaseDurumuOku();
+        const online=navigator.onLine&&firebaseBagli;
+        let level='neutral',title='Puan gönderim durumu',message='';
+        if(pending.length){
+            const problem=pending.some(x=>['yetki_hatasi','mac_kapali','mac_iptal','sure_engeli_arsiv_bekliyor'].includes(x.queueStatus)||x.lastError);
+            level=problem?'error':'warning';title=problem?'İncelenmesi gereken puan var':'Gönderim kuyruğunda puan var';
+            message=pending.length+' puan bu cihazda bekliyor; Firebase’den doğrulanmadan başarılı sayılmaz.';
+        }else if(durum?.durum==='success'){
+            level='success';title='Son puan gönderimi doğrulandı';message=String(durum.mesaj||'Firebase geri okuma doğrulaması başarılı.')+' · '+puanDurumTarihiYaz(durum.updatedAt);
+        }else if(durum?.durum==='error'){
+            level='error';title='Son puan gönderiminde hata';message=String(durum.mesaj||'Puan gönderimi doğrulanamadı.')+' · '+puanDurumTarihiYaz(durum.updatedAt);
+        }else if(durum?.mesaj){level='warning';title='Son puan gönderim durumu';message=String(durum.mesaj)+' · '+puanDurumTarihiYaz(durum.updatedAt);}
+        else message='Bu cihazda bekleyen puan yok. Henüz gönderim geçmişi bulunmuyor.';
+        if(bar){
+            bar.className='puan-guvence-bar durum-'+level;
+            bar.innerHTML='<div class="puan-guvence-main"><span class="puan-guvence-dot"></span><div class="puan-guvence-copy"><strong>'+htmlEscape(title)+'</strong><span>'+htmlEscape(message)+'</span></div></div>'+
+                '<div class="puan-guvence-actions"><button type="button" onclick="puanKuyrukDetayiniAc()">Bekleyen puanlar ('+pending.length+')</button><button type="button" onclick="juriPuanGecmisiniAc()">Gönderdiğim puanlar</button><span class="puan-guvence-connection">'+(online?'Firebase bağlantısı var':'Firebase bağlantısı yok')+'</span></div>';
+        }
+        puanAnaMenuKartiniGuncelle();
+    }
     function puanFirebaseDurumuGoster(){
         const els=[...document.querySelectorAll('#puanFirebaseDurumu')];
-        if(!els.length)return;
-        const q=offlineKuyrukGetir();
-        const pending=Object.values(q).filter(x=>x&&x.kayit);
+        const pending=Object.values(offlineKuyrukGetir()).filter(x=>x&&x.kayit);
         let durum=puanFirebaseAnlikDurum||puanFirebaseDurumuOku();
         if(pending.length){
             const yetki=pending.some(x=>x.queueStatus==='yetki_hatasi');
             const kapali=pending.some(x=>x.queueStatus==='mac_kapali'||x.queueStatus==='mac_iptal');
-            durum={
-                durum:'error',
-                mesaj:yetki
-                    ?'⚠ Firebase erişim yetkisi puan kaydını reddetti. Puan(lar) bu cihazın kuyruğunda; yönetici bağlantı/yetki ayarını kontrol etmeden gönderildi kabul etmeyin.'
-                    :kapali
-                        ?'⚠ Kuyrukta maç kapalı/iptal olduğu için gönderilemeyen puan var. Bu puanlar Firebase’e aktarılmadı; yöneticiyle kontrol edin.'
-                        :`⚠ ${pending.length} puan Firebase’de henüz doğrulanmadı. Bu cihazın gönderim kuyruğunda bekliyor; bağlantı gelince yeniden denenecek.`
-            };
+            durum={durum:'error',mesaj:yetki
+                ?'⚠ Firebase erişim yetkisi puan kaydını reddetti. Puan(lar) bu cihazın kuyruğunda; yönetici bağlantı/yetki ayarını kontrol etmeden gönderildi kabul etmeyin.'
+                :kapali
+                    ?'⚠ Kuyrukta maç kapalı/iptal olduğu için gönderilemeyen puan var. Bu puanlar Firebase’e aktarılmadı; yöneticiyle kontrol edin.'
+                    :'⚠ '+pending.length+' puan Firebase’de henüz doğrulanmadı. Bu cihazın gönderim kuyruğunda bekliyor; bağlantı gelince yeniden denenecek.'};
         }
         for(const el of els){
             if(!durum?.mesaj){el.style.display='none';el.textContent='';continue;}
-            el.style.display='block';
-            el.className='puanlama-bilgi'+(durum.durum==='success'?'':' hata');
-            el.setAttribute('role',durum.durum==='success'?'status':'alert');
-            el.textContent=durum.mesaj;
+            el.style.display='block';el.className='puanlama-bilgi'+(durum.durum==='success'?'':' hata');
+            el.setAttribute('role',durum.durum==='success'?'status':'alert');el.textContent=durum.mesaj;
+        }
+        puanDurumPaneliniGuncelle();
+    }
+    function puanAnaMenuKartiniGuncelle(){
+        const host=document.getElementById('anaMenuPuanDurumu');if(!host)return;
+        const pending=Object.values(offlineKuyrukGetir()).filter(x=>x&&x.kayit);
+        const durum=puanFirebaseAnlikDurum||puanFirebaseDurumuOku();
+        host.textContent=puanDurumOzetMetni();
+        host.className='home-puan-summary'+(pending.length?' has-pending':(durum?.durum==='success'?' is-success':''));
+        const count=document.getElementById('anaMenuKuyrukSayisi');if(count)count.textContent=String(pending.length);
+    }
+    function puanGuvenceModaliniKapat(){
+        const el=document.getElementById('puanGuvenceModal');if(el)el.remove();
+    }
+    function puanGuvenceModaliniAc(baslik,icerik){
+        puanGuvenceModaliniKapat();
+        const root=document.createElement('div');root.id='puanGuvenceModal';root.className='puan-guvence-overlay';
+        root.innerHTML='<div class="puan-guvence-modal" role="dialog" aria-modal="true" aria-label="'+htmlEscape(baslik)+'">'+
+            '<div class="puan-guvence-modal-head"><h2>'+htmlEscape(baslik)+'</h2><button type="button" aria-label="Kapat" onclick="puanGuvenceModaliniKapat()">✕</button></div>'+
+            '<div class="puan-guvence-modal-body">'+icerik+'</div></div>';
+        root.addEventListener('click',ev=>{if(ev.target===root)puanGuvenceModaliniKapat();});
+        document.body.appendChild(root);
+    }
+    function puanKriterDetayiHtml(kayit){
+        const p=kayit?.puanlar||{};
+        const rows=Array.from({length:13},(_,i)=>{
+            const v=p[i]??p[String(i)]??'—';
+            return '<div class="puan-guvence-criterion"><span>'+htmlEscape((i+1)+'. '+(krit[i]?.t||'Kriter '+(i+1)))+'</span><b>'+htmlEscape(v)+'</b></div>';
+        }).join('');
+        const total=Array.from({length:13},(_,i)=>Number(p[i]??p[String(i)]??0)).reduce((a,b)=>a+(Number.isFinite(b)?b:0),0);
+        return '<div class="puan-guvence-criteria">'+rows+'</div><div class="puan-guvence-total">Toplam: '+total+'/100</div>';
+    }
+    function puanKuyrukDurumMetni(item){
+        const s=String(item?.queueStatus||'bekliyor');
+        const names={gonderim_on_kontrol:'Gönderim ön kontrolünde',bekliyor:'Gönderim bekliyor',
+            dogrulama_bekliyor:'Firebase doğrulaması bekliyor',sure_dogrulama_bekliyor:'Süre doğrulaması bekliyor',
+            yetki_hatasi:'Firebase yetki hatası',mac_kapali_arsiv_bekliyor:'Maç kapalı; arşiv doğrulaması bekliyor',
+            sure_engeli_arsiv_bekliyor:'Süre sınırı nedeniyle resmî puana aktarılmadı'};
+        return names[s]||s.replace(/_/g,' ');
+    }
+    function puanKuyrukDetayiniAc(){
+        const entries=Object.entries(offlineKuyrukGetir()).filter(([,x])=>x&&x.kayit);
+        if(!entries.length){puanGuvenceModaliniAc('Bekleyen puanlar','<div class="puan-guvence-empty">Bu cihazın gönderim kuyruğunda bekleyen puan bulunmuyor. Bu bilgi, taslakların resmî puan kaydına gönderildiği anlamına gelmez.</div>');return;}
+        const html=entries.map(([key,item])=>{
+            const r=item.kayit||{},s=r.secim||{},stamp=Number(item.puanGondermeAniClientAt||item.puanGondermeAni||item.queuedAt||r.localUpdatedAt||0);
+            return '<article class="puan-guvence-record"><div class="puan-guvence-record-head"><div><strong>'+htmlEscape(r.macEtiketi||r.mac||item.macId||'Maç bilgisi yok')+'</strong><span>'+htmlEscape(item.kategori||'')+' · '+htmlEscape(s.taraf||'')+'</span></div><b class="puan-guvence-state">'+htmlEscape(puanKuyrukDurumMetni(item))+'</b></div>'+
+                '<p><b>Öğrenci:</b> '+htmlEscape(s.ogr||'—')+' · <b>Okul:</b> '+htmlEscape(s.okul||'—')+'</p>'+
+                '<p><b>Jüri:</b> '+htmlEscape(s.juri||'—')+' '+htmlEscape(s.juriAd||'')+' · <b>Gönderim:</b> '+htmlEscape(puanDurumTarihiYaz(stamp))+'</p>'+
+                (item.lastError||item.reddedilmeNedeni?'<p class="puan-guvence-error"><b>Son hata:</b> '+htmlEscape(item.lastError||item.reddedilmeNedeni)+'</p>':'')+
+                puanKriterDetayiHtml(r)+'<div class="puan-guvence-record-foot">Kayıt anahtarı: '+htmlEscape(key)+' · Bu ekran kaydı değiştirmez.</div></article>';
+        }).join('');
+        puanGuvenceModaliniAc('Bekleyen puanların ayrıntısı ('+entries.length+')',html);
+    }
+    async function juriPuanGecmisiniAc(){
+        const clientId=getClientId();
+        puanGuvenceModaliniAc('Gönderdiğim puanlar','<div class="puan-guvence-empty">Bu cihazın geçmiş kayıtları Firebase’den okunuyor…</div>');
+        try{
+            const cats=['ORTAOKUL','LİSE'];
+            const snapshots=await Promise.all(cats.map(async kategori=>{
+                const values=await Promise.all([db.ref('puanlar/'+kategori).once('value'),db.ref('arsiv/juriPuanYedekleri/'+kategori).once('value')]);
+                return {kategori,live:values[0],archive:values[1]};
+            }));
+            const rows=[],seen=new Set();
+            const add=(kategori,macId,key,record,source,state)=>{
+                if(!record?.secim||!record?.puanlar)return;
+                const recordClient=String(record.clientId||record.secim?.clientId||'');
+                if(!recordClient||recordClient!==clientId)return;
+                const stamp=Number(record.puanGondermeAniClientAt||record.puanGondermeAni||record.localUpdatedAt||record.yedekAt||record.createdAt||0);
+                const sig=Array.from({length:13},(_,i)=>record.puanlar?.[i]??record.puanlar?.[String(i)]??'').join(',');
+                const fingerprint=[kategori,macId,key,stamp,sig,!!record.reddedildi].join('|');
+                if(seen.has(fingerprint))return;seen.add(fingerprint);
+                rows.push({kategori,macId,record,source,state,stamp});
+            };
+            snapshots.forEach(({kategori,live,archive})=>{
+                live.forEach(ch=>{const r=ch.val();add(kategori,kayitMacId(r),ch.key,r,'Resmî puan kaydı','Firebase’e kaydedilmiş');});
+                archive.forEach(macNode=>macNode.forEach(recordNode=>{
+                    const root=recordNode.val()||{},mid=macNode.key,key=recordNode.key;
+                    if(root.sonDurum)add(kategori,mid,key,root.sonDurum,'Güncel yedek','Arşiv yedeği');
+                    if(root.reddedilen)add(kategori,mid,key,root.reddedilen,'Reddedilen / süre dışı','Resmî puana eklenmedi');
+                    if(root.bekleyen)add(kategori,mid,key,root.bekleyen,'Doğrulama bekleyen','İnceleme bekliyor');
+                    Object.entries(root.gecmis||{}).forEach(([historyKey,record])=>add(kategori,mid,key+'_'+historyKey,record,'Geçmiş kopyası',record?.reddedildi?'Resmî puana eklenmedi':'Arşiv geçmişi'));
+                }));
+            });
+            rows.sort((a,b)=>b.stamp-a.stamp);
+            const note='<div class="puan-guvence-note">Kayıtlar bu tarayıcının cihaz kimliğiyle eşleştirilir. Başka cihazdaki veya tarayıcı verisi temizlenmiş geçmiş bu listede görünmeyebilir. Liste salt okunurdur; Firebase kayıtlarına müdahale etmez.</div>';
+            if(!rows.length){puanGuvenceModaliniAc('Gönderdiğim puanlar',note+'<div class="puan-guvence-empty">Bu cihaz kimliğiyle eşleşen kayıt bulunamadı.</div>');return;}
+            const html=rows.map(x=>{
+                const r=x.record,s=r.secim||{};
+                return '<article class="puan-guvence-record"><div class="puan-guvence-record-head"><div><strong>'+htmlEscape(r.macEtiketi||r.mac||x.macId)+'</strong><span>'+htmlEscape(x.kategori)+' · '+htmlEscape(x.source)+'</span></div><b class="puan-guvence-state">'+htmlEscape(x.state)+'</b></div>'+
+                    '<p><b>Öğrenci:</b> '+htmlEscape(s.ogr||'—')+' · <b>Okul:</b> '+htmlEscape(s.okul||'—')+'</p>'+
+                    '<p><b>Jüri:</b> '+htmlEscape(s.juri||'—')+' '+htmlEscape(s.juriAd||'')+' · <b>Tarih:</b> '+htmlEscape(puanDurumTarihiYaz(x.stamp))+'</p>'+
+                    puanKriterDetayiHtml(r)+'</article>';
+            }).join('');
+            puanGuvenceModaliniAc('Gönderdiğim puanlar ('+rows.length+')',note+html);
+        }catch(err){
+            puanGuvenceModaliniAc('Gönderdiğim puanlar','<div class="puan-guvence-error">Geçmiş kayıtları okunamadı: '+htmlEscape(err?.message||err)+'<br>Firebase arşiv ve puan okuma izinlerini kontrol edin.</div>');
         }
     }
     function firebasePuanKaydiEslesiyor(bulut,beklenen){
@@ -736,19 +861,14 @@
         }
     }
 
+
     function networkDurumunuGuncelle() {
-        let el = document.getElementById('systemStatusBadge');
-        if (!el) {
-            el = document.createElement('div');
-            el.id = 'systemStatusBadge';
-            el.className = 'system-status';
-            document.body.appendChild(el);
-        }
-        const q = offlineKuyrukGetir();
-        const n = Object.keys(q).length;
-        const online = navigator.onLine && firebaseBagli;
-        el.innerHTML = `<span class="status-dot ${online?'online':'offline'}"></span>${online?'Çevrimiçi':'Çevrimdışı'}${n?` · Kuyruk: ${n}`:''}`;
-        el.title = n ? 'Firebase’den doğrulanmamış yerel puan kaydı var.' : 'Yerel gönderim kuyruğu boş; bu, açık puan taslaklarının resmî kayda gönderildiği anlamına gelmez.';
+        let el=document.getElementById('systemStatusBadge');
+        if(!el){el=document.createElement('div');el.id='systemStatusBadge';el.className='system-status';document.body.appendChild(el);}
+        const q=offlineKuyrukGetir(),n=Object.keys(q).length,online=navigator.onLine&&firebaseBagli;
+        el.innerHTML='<span class="status-dot '+(online?'online':'offline')+'"></span>'+(online?'Çevrimiçi':'Çevrimdışı')+(n?' · Kuyruk: '+n:'');
+        el.title=n?'Firebase’den doğrulanmamış yerel puan kaydı var.':'Yerel gönderim kuyruğu boş; bu, açık puan taslaklarının resmî kayda gönderildiği anlamına gelmez.';
+        puanFirebaseDurumuGoster();
     }
 
     async function ensureMatchExists(kategori, hukOkul, muhOkul) {
@@ -796,8 +916,9 @@
                         <span class="home-arrow">→</span>
                     </button>
                 </div>
-                <div class="home-foot"><span>Fikstür ve jüri puanları merkezi Firebase üzerinde tutulur.</span><button onclick="renderHakkinda()">Uygulama Hakkında →</button></div>
+                <section class="home-juri-puan-card"><div><h2>Jüri puan durumu</h2><p id="anaMenuPuanDurumu" class="home-puan-summary">Gönderim durumu yükleniyor…</p></div><div class="home-juri-puan-actions"><button type="button" onclick="puanKuyrukDetayiniAc()">Bekleyen puanlar (<span id="anaMenuKuyrukSayisi">0</span>)</button><button type="button" onclick="juriPuanGecmisiniAc()">Gönderdiğim puanlar</button></div></section><div class="home-foot"><span>Fikstür ve jüri puanları merkezi Firebase üzerinde tutulur.</span><button onclick="renderHakkinda()">Uygulama Hakkında →</button></div>
             </main>`;
+        puanFirebaseDurumuGoster();
     }
 
     function yoneticiOturumunuKapat() {

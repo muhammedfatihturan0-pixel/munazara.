@@ -264,3 +264,59 @@
         }
 
     
+/* 3.37 — Jüri puan gönderim güvencesi ve salt okunur geçmiş */
+body { padding-top: 78px; }
+.puan-guvence-bar {position:fixed;top:0;left:0;right:0;z-index:12000;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;min-height:58px;box-sizing:border-box;background:rgba(15,23,42,.97);border-bottom:1px solid #334155;box-shadow:0 5px 18px rgba(0,0,0,.28);color:#e2e8f0;}
+.puan-guvence-main {display:flex;align-items:center;gap:10px;min-width:0;}
+.puan-guvence-dot {width:10px;height:10px;flex:0 0 10px;border-radius:50%;background:#94a3b8;}
+.puan-guvence-copy {display:flex;flex-direction:column;min-width:0;gap:2px;}
+.puan-guvence-copy strong {font-size:12px;line-height:1.25;}
+.puan-guvence-copy span {font-size:11px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:min(55vw,760px);}
+.puan-guvence-actions {display:flex;align-items:center;gap:7px;flex:0 0 auto;}
+.puan-guvence-actions button,.home-juri-puan-actions button,.puan-guvence-juri-actions button {border:1px solid #475569;border-radius:8px;background:#1e293b;color:#e2e8f0;padding:7px 10px;font-size:11px;font-weight:700;cursor:pointer;}
+.puan-guvence-connection {color:#94a3b8;font-size:10px;white-space:nowrap;}
+.puan-guvence-bar.durum-success {border-bottom-color:#166534;}
+.puan-guvence-bar.durum-success .puan-guvence-dot {background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.12);}
+.puan-guvence-bar.durum-warning {border-bottom-color:#a16207;}
+.puan-guvence-bar.durum-warning .puan-guvence-dot {background:#f59e0b;box-shadow:0 0 0 4px rgba(245,158,11,.12);}
+.puan-guvence-bar.durum-error {border-bottom-color:#b91c1c;}
+.puan-guvence-bar.durum-error .puan-guvence-dot {background:#ef4444;box-shadow:0 0 0 4px rgba(239,68,68,.12);}
+.home-juri-puan-card {display:flex;align-items:center;justify-content:space-between;gap:16px;margin:14px auto;padding:16px 18px;max-width:100%;border:1px solid #334155;border-radius:14px;background:rgba(15,23,42,.82);}
+.home-juri-puan-card h2 {margin:0 0 6px;border:0;padding:0;font-size:16px;}
+.home-puan-summary {margin:0;color:#cbd5e1;font-size:12px;line-height:1.5;}
+.home-puan-summary.has-pending {color:#fbbf24;}
+.home-puan-summary.is-success {color:#86efac;}
+.home-juri-puan-actions,.puan-guvence-juri-actions {display:flex;gap:8px;flex-wrap:wrap;}
+.puan-guvence-juri-actions {margin:8px 0 14px;}
+.puan-guvence-overlay {position:fixed;inset:0;z-index:13000;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;background:rgba(2,6,23,.78);}
+.puan-guvence-modal {display:flex;flex-direction:column;width:min(980px,96vw);max-height:88vh;overflow:hidden;border:1px solid #475569;border-radius:16px;background:#0f172a;box-shadow:0 24px 60px rgba(0,0,0,.55);}
+.puan-guvence-modal-head {display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #334155;}
+.puan-guvence-modal-head h2 {margin:0;padding:0;border:0;font-size:19px;}
+.puan-guvence-modal-head button {border:0;border-radius:8px;padding:7px 10px;background:#334155;color:#fff;cursor:pointer;}
+.puan-guvence-modal-body {padding:16px;overflow:auto;}
+.puan-guvence-record {border:1px solid #334155;border-radius:12px;padding:13px;margin-bottom:12px;background:#111e32;}
+.puan-guvence-record-head {display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:9px;}
+.puan-guvence-record-head div {display:flex;flex-direction:column;gap:3px;}
+.puan-guvence-record-head div strong {color:#f8fafc;font-size:14px;}
+.puan-guvence-record-head div span,.puan-guvence-record p,.puan-guvence-record-foot {color:#94a3b8;font-size:11px;line-height:1.5;}
+.puan-guvence-record p {margin:5px 0;}
+.puan-guvence-state {color:#93c5fd;font-size:11px;text-align:right;}
+.puan-guvence-error {color:#fecaca !important;font-size:12px;line-height:1.5;}
+.puan-guvence-criteria {display:grid;grid-template-columns:1fr 1fr;gap:5px 12px;margin-top:10px;}
+.puan-guvence-criterion {display:flex;justify-content:space-between;gap:8px;padding:6px 8px;border-radius:7px;background:#17263d;font-size:11px;color:#cbd5e1;}
+.puan-guvence-criterion b {color:#f8fafc;white-space:nowrap;}
+.puan-guvence-total {margin-top:8px;text-align:right;color:#facc15;font-size:12px;font-weight:800;}
+.puan-guvence-record-foot {margin-top:8px;overflow-wrap:anywhere;}
+.puan-guvence-empty,.puan-guvence-note {padding:12px;border-radius:10px;background:#17263d;color:#cbd5e1;font-size:12px;line-height:1.6;}
+.puan-guvence-note {margin-bottom:12px;border-left:3px solid #3b82f6;}
+@media (max-width:760px) {
+ body {padding-top:106px;}
+ .puan-guvence-bar {align-items:flex-start;flex-direction:column;gap:7px;padding:8px 10px;min-height:0;}
+ .puan-guvence-copy span {max-width:92vw;white-space:normal;}
+ .puan-guvence-actions {width:100%;flex-wrap:wrap;}
+ .puan-guvence-actions button {font-size:10px;padding:6px 8px;}
+ .puan-guvence-connection {margin-left:auto;}
+ .home-juri-puan-card {align-items:flex-start;flex-direction:column;}
+ .puan-guvence-criteria {grid-template-columns:1fr;}
+ .puan-guvence-modal {max-height:92vh;}
+}
