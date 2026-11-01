@@ -351,8 +351,8 @@
                 <section class="juri-step-block">
                     <div class="juri-step-heading"><span>03</span><div><b>Değerlendireceğiniz taraf</b><small>Hükümet veya muhalefet okulunu seçin</small></div></div>
                     <div class="btn-grid juri-side-grid" style="grid-template-columns:1fr 1fr;margin:0;">
-                        <button class="btn taraf-btn ${secimler.taraf==='HÜKÜMET'?'btn-active':''}" style="border-left:4px solid var(--hukumet);" onclick="tekSecim(this,'taraf','taraf-btn')"><span>HÜKÜMET</span><small id="juriHukOkulEtiketi">Hükümet okulu</small></button>
-                        <button class="btn taraf-btn ${secimler.taraf==='MUHALEFET'?'btn-active':''}" style="border-left:4px solid var(--muhalefet);" onclick="tekSecim(this,'taraf','taraf-btn')"><span>MUHALEFET</span><small id="juriMuhOkulEtiketi">Muhalefet okulu</small></button>
+                        <button class="btn taraf-btn ${secimler.taraf==='HÜKÜMET'?'btn-active':''}" style="border-left:4px solid var(--hukumet);" onclick="tekSecim(this,'taraf','taraf-btn')" data-value="HÜKÜMET"><span>HÜKÜMET</span><small id="juriHukOkulEtiketi">Hükümet okulu</small></button>
+                        <button class="btn taraf-btn ${secimler.taraf==='MUHALEFET'?'btn-active':''}" style="border-left:4px solid var(--muhalefet);" onclick="tekSecim(this,'taraf','taraf-btn')" data-value="MUHALEFET"><span>MUHALEFET</span><small id="juriMuhOkulEtiketi">Muhalefet okulu</small></button>
                     </div>
                 </section>
                 <section class="juri-step-block juri-student-step">
@@ -672,7 +672,7 @@
     function tekSecim(element, tip, sinif) {
         document.querySelectorAll('.' + sinif).forEach(b => b.classList.remove('btn-active'));
         element.classList.add('btn-active');
-        secimler[tip] = element.innerText;
+        secimler[tip] = element.dataset?.value || element.innerText;
         if(tip === 'taraf') {
             secimler.ogr = '';
             ogrencileriYukle();
