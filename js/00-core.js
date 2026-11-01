@@ -473,10 +473,10 @@
             level=problem?'error':'warning';title=problem?'İncelenmesi gereken puan var':'Gönderim kuyruğunda puan var';
             message=pending.length+' puan bu cihazda bekliyor; Firebase’den doğrulanmadan başarılı sayılmaz.';
         }else if(durum?.durum==='success'){
-            level='success';title='Son puan gönderimi doğrulandı';message=String(durum.mesaj||'Firebase geri okuma doğrulaması başarılı.');
+            level='success';title='Son puan gönderimi doğrulandı';message=String(durum.mesaj||'Firebase geri okuma doğrulaması başarılı.')+' · '+puanDurumTarihiYaz(durum.updatedAt);
         }else if(durum?.durum==='error'){
-            level='error';title='Son puan gönderiminde hata';message=String(durum.mesaj||'Puan gönderimi doğrulanamadı.');
-        }else if(durum?.mesaj){level='warning';title='Son puan gönderim durumu';message=String(durum.mesaj);}
+            level='error';title='Son puan gönderiminde hata';message=String(durum.mesaj||'Puan gönderimi doğrulanamadı.')+' · '+puanDurumTarihiYaz(durum.updatedAt);
+        }else if(durum?.mesaj){level='warning';title='Son puan gönderim durumu';message=String(durum.mesaj)+' · '+puanDurumTarihiYaz(durum.updatedAt);}
         else message='Bu cihazda bekleyen puan yok. Henüz gönderim geçmişi bulunmuyor.';
         if(bar){
             bar.className='puan-guvence-bar durum-'+level;
