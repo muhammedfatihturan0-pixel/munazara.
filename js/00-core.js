@@ -240,6 +240,7 @@
         if(!Object.keys(restored).length){
             const d=document.getElementById('puanTaslakDurumu');
             if(d)d.textContent='Taslak yedekleme hazır: her kriter seçimi otomatik saklanır.';
+            if(typeof puanlamaIlerlemesiniGuncelle==='function')puanlamaIlerlemesiniGuncelle();
             return;
         }
         verilenPuanlar=restored;
@@ -251,6 +252,7 @@
             });
         });
         try{localStorage.setItem(ctx.localKey,JSON.stringify(veri));}catch(_){}
+        if(typeof puanlamaIlerlemesiniGuncelle==='function')puanlamaIlerlemesiniGuncelle();
         const d=document.getElementById('puanTaslakDurumu');
         if(d)d.textContent=`↩ ${Object.keys(restored).length}/13 kriter ${kaynak} yedeğinden geri yüklendi.`;
     }
