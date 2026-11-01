@@ -807,7 +807,11 @@
                         q[key].queueStatus='mac_kapali_arsiv_bekliyor';q[key].officialSendAllowed=false;
                         q[key].reddedilmeNedeni=neden;degisti=true;offlineKuyrukKaydet(q);
                         await puanReddedilenKaydiniArsivle(item,neden,'puan_mac_kapali_arsivlendi');
-                        delete q[key];degisti=true;continue;
+                        delete q[key];degisti=true;
+                        puanFirebaseDurumuYaz('warning',neden+' 13 kriterli kayıt yedek arşive yazıldı ve doğrulandı.',{
+                            kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
+                        });
+                        continue;
                     }
                     // Gönderim çevrimdışıyken yapıldıysa, yeniden bağlanma anı değil jüri tıklama anı ölçülür.
                     if(item.queueStatus==='sure_dogrulama_bekliyor')continue;
@@ -838,6 +842,9 @@
                             queueStatus:'sure_dogrulama_bekliyor',puanVerisi:{...(item.kayit?.puanlar||{})},
                             puanGonderildi:false,puanKuyrugaAlindi:true
                         });
+                        puanFirebaseDurumuYaz('warning',neden,{
+                            kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
+                        });
                         continue;
                     }
                     if(clickAt>bas+(ORTAK_SURE_LIMIT+ORTAK_PUAN_EK_SURE)*1000){
@@ -847,6 +854,9 @@
                         q[key].reddedilmeNedeni=neden;degisti=true;offlineKuyrukKaydet(q);
                         await puanReddedilenKaydiniArsivle(item,neden,'puan_sure_engeli_arsivlendi');
                         delete q[key];degisti=true;offlineKuyrukKaydet(q);
+                        puanFirebaseDurumuYaz('warning',neden+' 13 kriterli kayıt yedek arşive yazıldı ve doğrulandı.',{
+                            kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
+                        });
                         continue;
                     }
                     const rec = { ...item.kayit, serverSyncedAt: firebase.database.ServerValue.TIMESTAMP, offlineSynced: true };
@@ -862,7 +872,11 @@
                             hata:'Kuyruktaki eski puan yerine Firebase’deki daha yeni ve kimliği doğrulanmış jüri kaydı korundu.',
                             puanGonderildi:true,puanKuyrugaAlindi:false,puanKayitDogrulandi:true
                         });
-                        delete q[key];degisti=true;puanFirebaseDurumuTemizle(item.kayitId);continue;
+                        delete q[key];degisti=true;
+                        puanFirebaseDurumuYaz('success','Kuyruktaki eski puan yerine Firebase’deki daha yeni ve kimliği doğrulanmış kayıt korundu.',{
+                            kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
+                        });
+                        continue;
                     }
                     await puanRef.set(rec);
                     const dogrulama=await firebasePuanKaydiniDogrula(puanRef,rec);
@@ -886,7 +900,10 @@
                         puanKuyrugaAlindi:false,puanKayitDogrulandi:true,puanGonderildiClientAt:Date.now(),
                         ...(yedekHatasi?{yedekHatasi,yedekDurumu:'ikincil_yedek_yazilamadi'}:{yedekDurumu:'kaydedildi'})
                     });
-                    delete q[key];degisti=true;puanFirebaseDurumuTemizle(item.kayitId);
+                    delete q[key];degisti=true;
+                    puanFirebaseDurumuYaz('success','✓ Çevrimdışı kuyruktaki puan Firebase’e aktarıldı ve geri okunarak doğrulandı.',{
+                        kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
+                    });
                 } catch (err) {
                     console.warn('Offline kuyruk gönderilemedi:', err);
                     const code = String(err?.code || '').toLowerCase();
