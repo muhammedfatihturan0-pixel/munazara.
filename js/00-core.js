@@ -458,7 +458,7 @@
         const queue=offlineKuyrukGetir();
         const pending=Object.values(queue).filter(x=>{
             const kayit=x?.kayit||{};
-            return kayit.clientId===getClientId()&&(kayit.secim?.juri===oturum.juri||x.juri===oturum.juri);
+            return (!kayit.clientId||kayit.clientId===getClientId())&&(kayit.secim?.juri===oturum.juri||x.juri===oturum.juri);
         });
         const last=puanFirebaseAnlikDurum||puanFirebaseDurumuOku()||null;
         const scoringOpen=!!document.getElementById('kriterListesi');
