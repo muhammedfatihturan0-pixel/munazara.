@@ -610,7 +610,8 @@
                 const values=await Promise.all([db.ref('puanlar/'+kategori).once('value'),db.ref('arsiv/juriPuanYedekleri/'+kategori).once('value')]);
                 return {kategori,live:values[0],archive:values[1]};
             }));
-            if(modalToken!==puanGuvenceModalSurum||!document.getElementById('puanGuvenceModal'))return;\n            const rows=[],seen=new Set();
+            if(modalToken!==puanGuvenceModalSurum||!document.getElementById('puanGuvenceModal'))return;
+            const rows=[],seen=new Set();
             const add=(kategori,macId,key,record,source,state)=>{
                 if(!record?.secim||!record?.puanlar)return;
                 const recordClient=String(record.clientId||record.secim?.clientId||'');
