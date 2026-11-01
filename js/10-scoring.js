@@ -603,6 +603,7 @@
         secimler.macId=id;secimler.hukOkul=m.hukOkul;secimler.muhOkul=m.muhOkul;
         if(degisti){secimler.ogr='';secimler.okul='';}
         secimleriKaydet();
+        void juriCihazDurumunuGuncelle();
         puanlamaManuelOkulSecenekleri();
         puanlamaKaynakPaneliniGuncelle();
         void juriPaneliniGuncelle(m);
@@ -616,6 +617,7 @@
         secimler.macId='';secimler.ogr='';secimler.okul='';
         const sel=document.getElementById('aktifMac');if(sel)sel.value='';
         secimleriKaydet();
+        void juriCihazDurumunuGuncelle();
         puanlamaKaynakPaneliniGuncelle();
         if(secimler.taraf)ogrencileriYukle();
         canliJuriTakibiBaslat();
@@ -628,6 +630,7 @@
         const oturum=juriOturumuGetir();
         if(oturum){secimler.juri=oturum.juri;secimler.juriAd=oturum.ad;}
         secimleriKaydet();
+        void juriCihazDurumunuGuncelle();
         if(modul==='puanlama')renderPuanlamaSecim();
         if(modul==='ogrenci')renderOgrenci();
         if(modul==='turnuva')renderTurnuva();
@@ -679,6 +682,7 @@
         }
         secimleriKaydet();
         canliJuriTakibiBaslat();
+        void juriCihazDurumunuGuncelle();
     }
 
     function mevcutMacBilgisi() {
@@ -1237,6 +1241,7 @@ Devam edilsin mi?`)){
                     </div>
                 </div>`;
         document.getElementById('app').innerHTML = html;
+        void juriCihazDurumunuGuncelle();
         puanFirebaseDurumuGoster();
         ortakPuanArayuzunuGuncelle();
         void juriSureOturumLogla('acildi',{izinVerilenEkSureSaniye:ORTAK_PUAN_EK_SURE,
