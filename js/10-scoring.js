@@ -323,6 +323,7 @@
                     <button class="btn" style="background:#1d4ed8; margin:0;" onclick="renderSureAnaEkran()">⏱ Konuşma Süreleri (Şifresiz)</button>
                     <button class="btn" style="margin:0;" onclick="anaMenu()">← Ana Ekran</button>
                 </div>
+                <div class="puan-guvence-juri-actions"><button type="button" onclick="juriPuanGecmisiniAc()">📚 Gönderdiğim puanlar</button><button type="button" onclick="puanKuyrukDetayiniAc()">📤 Bekleyen puanlar</button></div>
                 ${juriHtml}
                 <div id="puanFirebaseDurumu" class="puanlama-bilgi hata" role="alert" style="display:none;"></div>
                 <div class="btn-grid" style="grid-template-columns: 1fr 1fr; margin-bottom:16px;">
