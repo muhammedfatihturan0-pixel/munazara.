@@ -7,6 +7,7 @@
     // Resmî sonuç, operasyon maç kaydının durumundan BAĞIMSIZ bir Firebase ağacında tutulur.
     // Bu ekran yalnızca okur: 'AÇIK' kayıtları sessizce kapatmaz, sonuçları değiştirmez.
     let aktifJuriCanliDurumMonitorRef=null;
+    let juriCanliResmiAdlari={};
     function juriTakipBugunKey(){
         const d=new Date();
         return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
@@ -68,7 +69,7 @@
         const at=Number(ts||0);
         return at?new Date(at).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—';
     }
-    function juriCanliJuriKartiniCiz(slot,label,record){
+    function juriCanliJuriKartiniCiz(slot,label,record,officialName=''){
         const r=record||{};
         const lastSeen=Number(r.lastSeenAt||r.lastSeenClientAt||0);
         const stale=!lastSeen||(Date.now()-lastSeen)>75000;
@@ -78,7 +79,7 @@
         const statusTone=pending?'warning':lastStatus==='error'?'error':lastStatus==='success'?'success':lastStatus==='queued'||lastStatus==='pending'?'warning':'neutral';
         const connText=online?'Bağlı':r.connectionStatus==='oturum_kapali'?'Jüri oturumu kapatıldı':lastSeen?'Bağlantı yok':'Henüz giriş yapmadı';
         const stateText=!lastSeen?'Henüz durum kaydı yok':pending?pending+' puan kuyrukta':lastStatus==='success'?'Son puan doğrulandı':lastStatus==='error'?'Son gönderimde hata':lastStatus==='queued'?'Gönderim bekliyor':r.screen==='puanlama'?'Puanlama ekranında':r.screen==='juri_secim'?'Jüri seçim ekranında':'Hazır';
-        const identity=r.ad||'Jüri oturumu henüz açılmadı';
+        const identity=r.ad||officialName||'Jüri oturumu henüz açılmadı';
         const roleName=r.yedekMi?'Yedek jüri · '+(r.yedekYerine||label)+' koltuğu':label;
         const currentMatch=[r.macEtiketi,r.taraf,r.okul].filter(Boolean).join(' · ');
         const student=r.ogrenci?'Öğrenci: '+r.ogrenci:'Öğrenci henüz seçilmedi';
@@ -98,7 +99,7 @@
             <footer><span>Son görülme: ${htmlEscape(juriCanliGecenSure(lastSeen))}</span><span>${client}</span></footer>
         </article>`;
     }
-    function juriCanliTakipVerisiniCiz(data,gun,kategori){
+    function juriCanliTakipVerisiniCiz(data,gun,kategori,officialNames=juriCanliResmiAdlari){
         const host=document.getElementById('juriCanliTakipHost');
         const summary=document.getElementById('juriCanliTakipOzet');
         if(!host||!summary)return;
@@ -115,7 +116,7 @@
             '<div class="admin-jury-summary-stat"><b>'+pending+'</b><span>Bekleyen puan</span></div>'+
             '<div class="admin-jury-summary-stat"><b>'+errors+'</b><span>Kontrol gerektiren cihaz</span></div>'+
             '<div class="admin-jury-summary-note">'+htmlEscape(gun)+' · '+(kategori==='lise'?'Lise':'Ortaokul')+'</div>';
-        host.innerHTML=seats.map((seat,i)=>juriCanliJuriKartiniCiz(i+1,seat.label,records[i])).join('');
+        host.innerHTML=seats.map((seat,i)=>juriCanliJuriKartiniCiz(i+1,seat.label,records[i],officialNames?.[seat.key]||'')).join('');
     }
     function juriCanliTakibiniBaslat(){
         if(!adminYetkiliMi())return;
@@ -131,6 +132,7 @@
         aktifJuriCanliDurumMonitorRef=ref;
         aktifCanliPanelRefs.push(ref);
         let sonVeri={};
+        juriCanliResmiAdlari={};
         ref.on('value',snap=>{
             sonVeri=snap.val()||{};
             juriCanliTakipVerisiniCiz(sonVeri,gun,kategori);
@@ -138,6 +140,16 @@
             const target=document.getElementById('juriCanliTakipHost');
             if(target)target.innerHTML='<div class="admin-jury-monitor-error">Jüri durumları okunamadı: '+htmlEscape(err?.message||err)+'. Firebase okuma izinlerini kontrol edin.</div>';
         });
+        // Bağlanmamış tabletler için de resmî görevlendirilmiş jüri isimlerini göster.
+        db.ref('fikstur/tekSalon_2026_2027/juries/'+gun+'/'+kategori).once('value').then(snap=>{
+            const roster=snap.val()||{};
+            juriCanliResmiAdlari={
+                juri1:roster.asil1?.name||'',
+                juri2:roster.asil2?.name||'',
+                juri3:roster.asil3?.name||''
+            };
+            juriCanliTakipVerisiniCiz(sonVeri,gun,kategori);
+        }).catch(err=>console.warn('Jüri görevlendirme adları okunamadı:',err));
         if(juriCanliTakipYenileTick)clearInterval(juriCanliTakipYenileTick);
         juriCanliTakipYenileTick=setInterval(()=>{
             if(!document.getElementById('juriCanliTakipHost')){
