@@ -1,5 +1,5 @@
 
-    const APP_VERSION = '3.40 · Yönetici Paneli, Manuel BAY ve Akıllı Jüri Arayüzü';
+    const APP_VERSION = '3.41 · Merkezi Jüri Canlı Takibi';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -27,6 +27,9 @@
     let aktifJuriMacListenerRef = null;
     let aktifCanliPanelRefs = [];
     let aktifTurnuvaRef = null;
+    const JURI_CANLI_DURUM_YOLU='arsiv/juriCanliDurumlari';
+    let juriCanliDurumAktifYol='';
+    let juriCanliDisconnectKaydiYol='';
 
     function puanMetniNormalize(v) {
         return String(v ?? '').normalize('NFC').trim();
@@ -316,6 +319,8 @@
             alert('Günün jüri görevlendirmesi doğrulanamadı. İnternet bağlantısını kontrol edip tekrar deneyin.');
             return;
         }
+        const oncekiOturum=juriOturumuGetir();
+        if(oncekiOturum)void juriCihazDurumunuOturumunuKapat(oncekiOturum,'juri_kilidi_degisti');
         const oturum = { juri, ad: temizAd, yedekMi:false, gunKey: baglam.gunKey, gunLabel: baglam.gunLabel,
             kategori: baglam.kategori, lockedAt: Date.now(), clientId: getClientId() };
         localStorage.setItem(JURI_OTURUM_KEY, JSON.stringify(oturum));
@@ -323,6 +328,7 @@
         secimler.juriAd = temizAd;
         secimleriKaydet();
         renderPuanlamaSecim();
+        void juriCihazDurumunuGuncelle(true);
         if(typeof sonucDuyuruGoster==='function')sonucDuyuruGoster();
     }
 
@@ -348,6 +354,8 @@
         const soru = `${yedekAd}, ${juri} (${asilAd || 'asıl jüri'}) koltuğunun yerine görevlendirilecek.\n\nBu değişikliği bu cihazdaki jüri oturumu için uygulayalım mı?`;
         if (!confirm(soru)) return;
         // Puan kaydında 1./2./3. jüri rolü korunur; yedek kişi seçilen koltuğa vekâleten puan girer.
+        const oncekiOturum=juriOturumuGetir();
+        if(oncekiOturum)void juriCihazDurumunuOturumunuKapat(oncekiOturum,'juri_kilidi_degisti');
         const oturum = {
             juri, ad: yedekAd, yedekMi:true, yedekYerine:juri, asilinAdi:asilAd,
             gunKey:baglam.gunKey, gunLabel:baglam.gunLabel, kategori:baglam.kategori,
@@ -358,6 +366,7 @@
         secimler.juriAd = yedekAd;
         secimleriKaydet();
         renderPuanlamaSecim();
+        void juriCihazDurumunuGuncelle(true);
         if(typeof sonucDuyuruGoster==='function')sonucDuyuruGoster();
     }
 
@@ -422,6 +431,8 @@
 
     function juriOturumunuSifirla() {
         if (!confirm('Bu cihazdaki jüri oturumunu sıfırlamak istiyor musunuz? Girilmiş puanlar ve fikstür SİLİNMEYECEK; yalnızca bu cihazdaki jüri kilidi kaldırılacak.')) return;
+        const eskiOturum=juriOturumuGetir();
+        if(eskiOturum)void juriCihazDurumunuOturumunuKapat(eskiOturum,'juri_oturumu_kapatildi');
         localStorage.removeItem(JURI_OTURUM_KEY);
         secimler.juri = '';
         secimler.juriAd = '';
@@ -431,6 +442,82 @@
 
     function offlineKuyrukGetir() {
         try { return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '{}') || {}; } catch (_) { return {}; }
+    }
+
+    function juriCanliDurumSlotu(oturum){
+        return ({'1. Jüri':'juri1','2. Jüri':'juri2','3. Jüri':'juri3'})[oturum?.juri]||'';
+    }
+    function juriCanliDurumRefOlustur(oturum){
+        const slot=juriCanliDurumSlotu(oturum);
+        if(!slot||!/^\d{4}-\d{2}-\d{2}$/.test(String(oturum?.gunKey||''))||
+            !['ortaokul','lise'].includes(String(oturum?.kategori||'')))return null;
+        return db.ref(JURI_CANLI_DURUM_YOLU+'/'+oturum.gunKey+'/'+oturum.kategori+'/'+slot);
+    }
+    function juriCihazDurumVerisiOlustur(oturum){
+        const queue=offlineKuyrukGetir();
+        const pending=Object.values(queue).filter(x=>{
+            const kayit=x?.kayit||{};
+            return kayit.clientId===getClientId()&&(kayit.secim?.juri===oturum.juri||x.juri===oturum.juri);
+        });
+        const last=puanFirebaseAnlikDurum||puanFirebaseDurumuOku()||null;
+        const scoringOpen=!!document.getElementById('kriterListesi');
+        const selectionOpen=!!document.getElementById('aktifMac');
+        const mac=puanlamaMaclar?.get?.(secimler.macId)||null;
+        const matchLabel=mac?.etiket||(secimler.hukOkul&&secimler.muhOkul?macEtiketi(secimler.hukOkul,secimler.muhOkul):'');
+        return {
+            online:true,connectionStatus:'online',
+            juri:oturum.juri,ad:oturum.ad||'',yedekMi:!!oturum.yedekMi,
+            yedekYerine:oturum.yedekYerine||'',asilinAdi:oturum.asilinAdi||'',
+            gunKey:oturum.gunKey,kategori:oturum.kategori,clientId:getClientId(),
+            appVersion:APP_VERSION,screen:scoringOpen?'puanlama':selectionOpen?'juri_secim':'uygulama',
+            macId:secimler.macId||'',macEtiketi:matchLabel||'',
+            taraf:secimler.taraf||'',okul:secimler.okul||'',
+            ogrenci:(secimler.ogr||'').split(' (')[0],
+            pendingCount:pending.length,
+            lastScoreStatus:last?.durum||'',
+            lastScoreMessage:last?.mesaj||'',
+            lastScoreAt:Number(last?.updatedAt||0),
+            lastScoreStudent:last?.ogr||'',
+            lastScoreMatchId:last?.macId||'',
+            lastSeenClientAt:Date.now(),
+            lastSeenAt:firebase.database.ServerValue.TIMESTAMP
+        };
+    }
+    async function juriCihazDurumunuGuncelle(forceDisconnectRegistration=false){
+        const oturum=juriOturumuGetir();
+        const ref=juriCanliDurumRefOlustur(oturum);
+        if(!ref||!firebaseBagli||!navigator.onLine)return false;
+        const yol=ref.toString();
+        if(forceDisconnectRegistration||juriCanliDisconnectKaydiYol!==yol){
+            try{
+                await ref.onDisconnect().update({
+                    online:false,connectionStatus:'offline',
+                    disconnectedAt:firebase.database.ServerValue.TIMESTAMP
+                });
+                juriCanliDisconnectKaydiYol=yol;
+            }catch(err){console.warn('Jüri bağlantı kesilme kaydı kurulamadı:',err);}
+        }
+        try{
+            await ref.update(juriCihazDurumVerisiOlustur(oturum));
+            juriCanliDurumAktifYol=yol;
+            return true;
+        }catch(err){
+            console.warn('Merkezi jüri canlı durumu güncellenemedi:',err);
+            return false;
+        }
+    }
+    async function juriCihazDurumunuOturumunuKapat(oturum,neden='oturum_kapatildi'){
+        const ref=juriCanliDurumRefOlustur(oturum);
+        if(!ref||!firebaseBagli||!navigator.onLine)return false;
+        try{
+            await ref.update({
+                online:false,connectionStatus:'oturum_kapali',screen:'kapali',
+                closeReason:neden,disconnectedAt:firebase.database.ServerValue.TIMESTAMP,
+                lastSeenClientAt:Date.now()
+            });
+            if(juriCanliDurumAktifYol===ref.toString())juriCanliDurumAktifYol='';
+            return true;
+        }catch(err){console.warn('Jüri oturum kapanışı merkezi izlemeye yazılamadı:',err);return false;}
     }
 
     const PUAN_FIREBASE_DURUM_KEY='munazaraPuanFirebaseDurumV1';
@@ -448,6 +535,7 @@
             puanBildirimKaydiniEkle(kayit);
         }catch(err){console.warn('Son puan gönderim/bildirim durumu cihazda saklanamadı:',err);}
         puanFirebaseDurumuGoster();
+        void juriCihazDurumunuGuncelle();
     }
     function puanFirebaseDurumunuTemizle(kayitId=''){
         try{const old=puanFirebaseDurumuOku();if(!kayitId||!old?.kayitId||old.kayitId===kayitId)localStorage.removeItem(PUAN_FIREBASE_DURUM_KEY);}catch(_){}
@@ -965,6 +1053,8 @@
         aktifCanliPanelRefs.forEach(r => { try { r.off(); } catch (_) {} });
         aktifCanliPanelRefs = [];
         if (aktifTurnuvaRef) { try { aktifTurnuvaRef.off(); } catch (_) {} aktifTurnuvaRef = null; }
+        const monitorHost=document.getElementById('juriCanliTakipHost');
+        if(monitorHost)monitorHost.innerHTML='';
     }
 
     function anaMenu() {
@@ -1207,6 +1297,7 @@
                         <header><span class="admin-group-icon">👥</span><div><h2>Katılımcı Yönetimi</h2><p>Okullar, öğrenciler ve jüri işlemleri</p></div></header>
                         <div class="admin-tool-grid">
                             <button class="admin-tool-card" onclick="renderOgrenci()"><span class="admin-tool-icon">🏫</span><span><b>Okullar ve Öğrenciler</b><small>Öğrenci kayıtları, ad düzenleme ve Excel aktarma.</small></span><i>→</i></button>
+                            <button class="admin-tool-card" onclick="renderJuriCanliTakip()"><span class="admin-tool-icon">📡</span><span><b>Canlı Jüri Takibi</b><small>1., 2. ve 3. jürinin bağlantısını, kuyruklarını ve son puan durumlarını tek ekranda izle.</small></span><i>→</i></button>
                             <button class="admin-tool-card" onclick="renderJuriSureLoglari()"><span class="admin-tool-icon">🧾</span><span><b>Jüri / Süre İşlem Günlüğü</b><small>Puan gönderimleri, süre engelleri ve işlem geçmişi.</small></span><i>→</i></button>
                         </div>
                     </section>
