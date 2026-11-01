@@ -290,7 +290,7 @@
 </div>
 
 <script>
-    const APP_VERSION = '3.33 · Okul ve Jüri Excel Filtresi';
+    const APP_VERSION = '3.34 · Jüri Puan Aktarım Takibi';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -792,10 +792,59 @@
         puanFirebaseDurumuGoster();
     }
 
+    function aktifJuriAuditKaydiniBul(kategori, macId) {
+        try {
+            const d=JSON.parse(localStorage.getItem(JURI_SURE_AUDIT_OTURUM_KEY)||'null');
+            if(!d?.logId||d.kategori!==kategori||d.macId!==macId)return null;
+            return d;
+        } catch(_) { return null; }
+    }
+
+    async function puanAktarimDenetiminiGuncelle(item, patch) {
+        const sec=item?.kayit?.secim||{};
+        const kategori=item?.kategori||'ORTAOKUL';
+        const temel={
+            kategori, macId:item?.macId||'', macEtiketi:item?.kayit?.macEtiketi||item?.kayit?.mac||'',
+            okul:sec.okul||'', ogrenci:String(sec.ogr||'').split(' (')[0], taraf:sec.taraf||'',
+            juri:sec.juri||'', juriAd:sec.juriAd||'', clientId:item?.kayit?.clientId||'',
+            uygulamaSurumu:APP_VERSION
+        };
+        let logId=item?.auditLogId||'';
+        try {
+            if(!logId){
+                const ref=db.ref(`arsiv/juriSureOlaylari/${kategori}`).push();
+                await ref.set({...temel,...patch,islem:'puan_kayit_senkronizasyonu',
+                    logId:ref.key,clientAt:Date.now(),createdAt:firebase.database.ServerValue.TIMESTAMP});
+                item.auditLogId=ref.key;
+                return;
+            }
+            const localQueue=juriSureAuditKuyruguGetir();
+            const pending=localQueue.some(x=>x.kategori===kategori&&x.logId===logId);
+            if(pending){
+                juriSureAuditGuncellemeKuyrugaAl(kategori,logId,temel,patch);
+                await juriSureAuditKuyrugunuGonder();
+                return;
+            }
+            await db.ref(`arsiv/juriSureOlaylari/${kategori}/${logId}`).update({
+                ...patch, updatedAt:firebase.database.ServerValue.TIMESTAMP
+            });
+        } catch(err) {
+            console.warn('Puan aktarım denetim kaydı güncellenemedi:',err);
+            if(logId){
+                try{juriSureAuditGuncellemeKuyrugaAl(kategori,logId,temel,patch);}catch(queueErr){
+                    console.warn('Puan aktarım denetimi yerel kuyruğa da alınamadı:',queueErr);
+                }
+            }
+        }
+    }
+
+    let offlineKuyrukGonderiliyor=false;
     function puaniKuyrugaEkle(item) {
         const q = offlineKuyrukGetir();
         const key = `${item.kategori}__${item.kayitId}`;
-        q[key] = { ...item, queuedAt: Date.now(), queueStatus: 'bekliyor' };
+        const audit=aktifJuriAuditKaydiniBul(item.kategori,item.macId);
+        q[key] = { ...item, auditLogId:item.auditLogId||audit?.logId||'',
+            queuedAt: Date.now(), queueStatus: 'bekliyor' };
         offlineKuyrukKaydet(q);
         puanFirebaseDurumuYaz('queued','⚠ Puan bu cihazda kuyruğa alındı; Firebase’de henüz doğrulanmadı. Bağlantı geldiğinde yeniden gönderilecek. Bu uyarı kalkmadan kaydı gönderildi saymayın.',{
             kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
@@ -803,52 +852,95 @@
     }
 
     async function offlineKuyruguGonder() {
-        if (!navigator.onLine || !firebaseBagli) return;
-        const q = offlineKuyrukGetir();
-        const keys = Object.keys(q);
-        if (!keys.length) return;
-        let degisti = false;
-        for (const key of keys) {
-            const item = q[key];
-            try {
-                const mSnap = await db.ref(`maclar/${item.kategori}/${item.macId}`).once('value');
-                const m = mSnap.val();
-                if (m && ['kapali','iptal'].includes(m.durum)) {
-                    q[key].queueStatus = m.durum==='iptal'?'mac_iptal':'mac_kapali';
+        if(offlineKuyrukGonderiliyor)return;
+        offlineKuyrukGonderiliyor=true;
+        try {
+            if (!navigator.onLine || !firebaseBagli) return;
+            const q = offlineKuyrukGetir();
+            const keys = Object.keys(q);
+            if (!keys.length) return;
+            let degisti = false;
+            for (const key of keys) {
+                const item = q[key];
+                try {
+                    const mSnap = await db.ref(`maclar/${item.kategori}/${item.macId}`).once('value');
+                    const m = mSnap.val();
+                    if (m && ['kapali','iptal'].includes(m.durum)) {
+                        const neden=m.durum==='iptal'?'Maç iptal edildiği için çevrimdışı puan otomatik aktarılamadı.':'Maç kapatıldığı için çevrimdışı puan otomatik aktarılamadı.';
+                        q[key].queueStatus = m.durum==='iptal'?'mac_iptal':'mac_kapali';
+                        degisti = true;
+                        await puanAktarimDenetiminiGuncelle(item,{
+                            durum:'puan_kuyruk_engeli_mac_kapali',hata:neden,queueStatus:q[key].queueStatus,
+                            puanGonderildi:false,puanKuyrugaAlindi:true
+                        });
+                        continue;
+                    }
+                    const rec = { ...item.kayit, serverSyncedAt: firebase.database.ServerValue.TIMESTAMP, offlineSynced: true };
+                    const puanRef=db.ref(`puanlar/${item.kategori}/${item.kayitId}`);
+                    // Aynı jüri daha sonra daha yeni bir puan gönderdiyse eski çevrimdışı kuyruk bu kaydı ezemez.
+                    const mevcutSnap=await puanRef.once('value');
+                    const mevcut=mevcutSnap.val();
+                    if(mevcut && Number(mevcut.localUpdatedAt||0)>Number(rec.localUpdatedAt||0)){
+                        const kimlikUyumlu=firebasePuanKaydiEslesiyor(mevcut,{...rec,puanlar:mevcut.puanlar});
+                        if(!kimlikUyumlu)throw new Error('Firebase’de daha yeni bir kayıt var ancak jüri/öğrenci kimliği eşleşmiyor. Eski kuyruk kaydı güvenlik için aktarılmadı.');
+                        await puanAktarimDenetiminiGuncelle(item,{
+                            durum:'puanlar_gonderildi_daha_yeni_kayit_korundu',
+                            hata:'Kuyruktaki eski puan yerine Firebase’deki daha yeni ve kimliği doğrulanmış jüri kaydı korundu.',
+                            puanGonderildi:true,puanKuyrugaAlindi:false,puanKayitDogrulandi:true
+                        });
+                        delete q[key];
+                        degisti=true;
+                        puanFirebaseDurumuTemizle(item.kayitId);
+                        continue;
+                    }
+                    await puanRef.set(rec);
+                    const dogrulama=await firebasePuanKaydiniDogrula(puanRef,rec);
+                    if(!dogrulama.ok)throw new Error('Firebase kuyruğa alınan puanı geri okuyup doğrulayamadı. Kayıt kuyrukta korunuyor.');
+                    // Çevrimdışı gönderim de çevrimiçi gönderim gibi bağımsız arşiv yedeği üretir.
+                    let yedekHatasi='';
+                    try{
+                        const yedekYolu=`arsiv/juriPuanYedekleri/${item.kategori}/${item.macId}/${item.kayitId}`;
+                        await db.ref(yedekYolu+'/sonDurum').set({...rec,yedekAt:firebase.database.ServerValue.TIMESTAMP});
+                        await db.ref(yedekYolu+'/gecmis/'+String(item.queuedAt||Date.now())).set({...rec,yedekAt:firebase.database.ServerValue.TIMESTAMP,yedekOlayi:'juri_puani_offline_senkronize'});
+                    }catch(yedekErr){yedekHatasi=String(yedekErr?.message||yedekErr);console.warn('Offline puan doğrulandı ancak arşiv yedeği yazılamadı:',yedekErr);}
+                    if(item.taslakYolu)await db.ref(item.taslakYolu).transaction(cur=>{
+                        if(!cur)return cur;
+                        if(cur.durum==='gonderildi')return cur;
+                        const now=Date.now();
+                        return {...cur,durum:'gonderildi',tamamlandiAt:now,
+                            tamamlananLocalUpdatedAt:Number(cur.localUpdatedAt||0),offlineSenkron:true};
+                    },undefined,false).catch(e=>console.warn('Senkronize taslak kapatılamadı:',e));
+                    if(item.taslakYerelAnahtari)try{localStorage.removeItem(item.taslakYerelAnahtari);}catch(_){}
+                    await puanAktarimDenetiminiGuncelle(item,{
+                        durum:'puanlar_gonderildi_offline_senkronize',puanGonderildi:true,
+                        puanKuyrugaAlindi:false,puanKayitDogrulandi:true,puanGonderildiClientAt:Date.now(),
+                        ...(yedekHatasi?{yedekHatasi,yedekDurumu:'ikincil_yedek_yazilamadi'}:{yedekDurumu:'kaydedildi'})
+                    });
+                    // Puan kuyruğunu senkronize etmek ortak konuşma sayacını KAPATMAZ.
+                    delete q[key];
                     degisti = true;
-                    continue;
+                    puanFirebaseDurumuTemizle(item.kayitId);
+                } catch (err) {
+                    console.warn('Offline kuyruk gönderilemedi:', err);
+                    const code = String(err?.code || '').toLowerCase();
+                    if (code.includes('permission')) q[key].queueStatus = 'yetki_hatasi';
+                    else if(String(err?.message||'').includes('daha yeni bir kayıt')) q[key].queueStatus='kayit_cakismasi';
+                    else q[key].queueStatus = 'dogrulama_bekliyor';
+                    await puanAktarimDenetiminiGuncelle(item,{
+                        durum:code.includes('permission')?'puan_kuyruk_yetki_hatasi':'puan_kuyruk_senkron_hatasi',
+                        hata:String(err?.message||err),queueStatus:q[key].queueStatus,
+                        puanGonderildi:false,puanKuyrugaAlindi:true
+                    });
+                    puanFirebaseDurumuYaz('error','⚠ Kuyruktaki puan Firebase’den doğrulanamadı. Kayıt bu cihazda korunuyor; yönetici kontrolü olmadan gönderildi kabul etmeyin.',{
+                        kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
+                    });
                 }
-                const rec = { ...item.kayit, serverSyncedAt: firebase.database.ServerValue.TIMESTAMP, offlineSynced: true };
-                const puanRef=db.ref(`puanlar/${item.kategori}/${item.kayitId}`);
-                await puanRef.set(rec);
-                const dogrulama=await firebasePuanKaydiniDogrula(puanRef,rec);
-                if(!dogrulama.ok)throw new Error('Firebase kuyruğa alınan puanı geri okuyup doğrulayamadı. Kayıt kuyrukta korunuyor.');
-                if(item.taslakYolu)await db.ref(item.taslakYolu).transaction(cur=>{
-                    if(!cur)return cur;
-                    if(cur.durum==='gonderildi')return cur;
-                    const now=Date.now();
-                    return {...cur,durum:'gonderildi',tamamlandiAt:now,
-                        tamamlananLocalUpdatedAt:Number(cur.localUpdatedAt||0),offlineSenkron:true};
-                },undefined,false).catch(e=>console.warn('Senkronize taslak kapatılamadı:',e));
-                if(item.taslakYerelAnahtari)try{localStorage.removeItem(item.taslakYerelAnahtari);}catch(_){}
-                // Puan kuyruğunu senkronize etmek ortak konuşma sayacını KAPATMAZ.
-                delete q[key];
-                degisti = true;
-                puanFirebaseDurumuTemizle(item.kayitId);
-            } catch (err) {
-                console.warn('Offline kuyruk gönderilemedi:', err);
-                const code = String(err?.code || '').toLowerCase();
-                if (code.includes('permission')) q[key].queueStatus = 'yetki_hatasi';
-                else q[key].queueStatus = 'dogrulama_bekliyor';
-                puanFirebaseDurumuYaz('error','⚠ Kuyruktaki puan Firebase’den doğrulanamadı. Kayıt bu cihazda korunuyor; yönetici kontrolü olmadan gönderildi kabul etmeyin.',{
-                    kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
-                });
-                degisti = true;
-                break;
             }
+            if (degisti) offlineKuyrukKaydet(q);
+            puanFirebaseDurumuGoster();
+        } finally {
+            offlineKuyrukGonderiliyor=false;
         }
-        if (degisti) offlineKuyrukKaydet(q);
-        puanFirebaseDurumuGoster();
     }
 
     function networkDurumunuGuncelle() {
@@ -1126,7 +1218,7 @@
         dinleyicileriTemizle();
         document.getElementById('app').innerHTML=`<div class="card" style="max-width:1250px;">
             <h2>Jüri / Süre İşlem Günlüğü</h2>
-            <div class="puanlama-bilgi">Bu bölüm puanlama ekranı açılışlarını, süre aşımı nedeniyle engellenen girişleri ve isteğe bağlı sıfırlama taleplerini gösterir. “Kullanıldı: Hayır” sıfırlamanın uygulanmadığını; “İptal” kullanıcı onayı vermediğini; “Uygulandı” ortak sürenin bütün jüri cihazları için yeniden başlatıldığını belirtir.</div>
+            <div class="puanlama-bilgi">Bu bölüm jüri puanlama ekranı açılışlarını, puan gönderim/geri okuma hatalarını, çevrimdışı aktarım kuyruğunu, süre engellerini ve isteğe bağlı sıfırlamaları gösterir. “Puanlar gönderildi” yalnızca Firebase geri okuma doğrulaması başarılıysa kullanılır. Kuyrukta, hata veya doğrulama bekleyen kayıtları maç sonuçlandırılmadan önce inceleyin.</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
                 <button class="btn" style="width:auto;background:#1d4ed8" onclick="renderJuriSureLoglari()">↻ Günlüğü yenile</button>
                 <button class="btn" style="width:auto;background:#475569" onclick="renderYoneticiMenu()">← Yönetici menüsü</button>
@@ -1150,9 +1242,9 @@
             const tarih=v=>{const n=Number(v.createdAt||v.clientAt||0);return n?new Date(n).toLocaleString('tr-TR'):'Tarih bekleniyor';};
             const evetHayir=v=>v===true?'Evet':v===false?'Hayır':'—';
             const html=rows.map(v=>{
-                const details=[v.sebep?`Gerekçe: ${v.sebep}`:'',v.hata?`Hata: ${v.hata}`:'',v.iptalNedeni?`İptal: ${v.iptalNedeni}`:'',v.sifirlamaDurumu?`Sıfırlama durumu: ${v.sifirlamaDurumu}`:'',v.kaynakEkran?`Kaynak: ${v.kaynakEkran}`:'',v.syncDurumu==='bekliyor'?'Denetim kaydı aktarım bekliyor':'' ].filter(Boolean).join(' · ');
+                const details=[v.sebep?`Gerekçe: ${v.sebep}`:'',v.hata?`Hata: ${v.hata}`:'',v.puanKuyrukHatasi?`Kuyruk hatası: ${v.puanKuyrukHatasi}`:'',v.firebaseHatasiKodu?`Firebase kodu: ${v.firebaseHatasiKodu}`:'',v.puanGondermeEngelNedeni?`Gönderim engeli: ${v.puanGondermeEngelNedeni}`:'',v.queueStatus?`Kuyruk durumu: ${v.queueStatus}`:'',v.kayitId?`Kayıt: ${v.kayitId}`:'',v.yedekHatasi?`İkincil yedek hatası: ${v.yedekHatasi}`:'',v.iptalNedeni?`İptal: ${v.iptalNedeni}`:'',v.sifirlamaDurumu?`Sıfırlama durumu: ${v.sifirlamaDurumu}`:'',v.kaynakEkran?`Kaynak: ${v.kaynakEkran}`:'',v.syncDurumu==='bekliyor'?'Denetim kaydı aktarım bekliyor':'' ].filter(Boolean).join(' · ');
                 const state=String(v.durum||'—');
-                const color=state==='uygulandi'||state==='acildi'?'#34d399':state.includes('engellendi')||state==='basarisiz'?'#fca5a5':state==='iptal_edildi'?'#fbbf24':'#cbd5e1';
+                const color=state==='uygulandi'||state==='acildi'||state.startsWith('puanlar_gonderildi')?'#34d399':state.includes('engellendi')||state.includes('hata')||state.includes('kuyru')||state==='basarisiz'?'#fca5a5':state==='iptal_edildi'?'#fbbf24':'#cbd5e1';
                 return `<tr><td style="white-space:nowrap">${htmlEscape(tarih(v))}</td><td>${htmlEscape(v.islem||'—')}</td><td>${htmlEscape(v.kategori||'—')}<br>${htmlEscape(v.macEtiketi||v.macId||'—')}</td><td>${htmlEscape(v.okul||'—')}<br><b>${htmlEscape(v.ogrenci||'—')}</b> · ${htmlEscape(v.taraf||'—')}</td><td>${htmlEscape(v.juri||'—')}<br>${htmlEscape(v.juriAd||'')}</td><td style="font-weight:800;color:${color}">${htmlEscape(state)}</td><td>${evetHayir(v.sifirlamaKullanildi)}</td><td style="min-width:260px;white-space:normal">${htmlEscape(details||v.hata||'—')}</td></tr>`;
             }).join('');
             host.innerHTML=`<div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">Son ${rows.length} kayıt gösteriliyor (kategori başına en fazla 500 kayıt; çevrimdışı yerel kayıtlar varsa aktarım bekliyor olarak görünür).</div><div style="overflow:auto"><table class="tutanak-table" style="min-width:1100px"><thead><tr><th>Tarih</th><th>İşlem</th><th>Kategori / Maç</th><th>Okul / Öğrenci</th><th>Jüri</th><th>Sonuç</th><th>Sıfırlama kullanıldı mı?</th><th>Gerekçe / ayrıntı</th></tr></thead><tbody>${html}</tbody></table></div>`;
@@ -2521,7 +2613,12 @@ Devam edilsin mi?`)){
 
             await ensureMatchExists(secimler.kategori, mac.hukOkul, mac.muhOkul);
             const m = await macDurumuGetir(secimler.kategori, mac.id);
-            if (['kapali','iptal'].includes(m?.durum)) return alert('Bu maç kapatılmış veya iptal edilmiştir. Puan gönderilmedi.');
+            if (['kapali','iptal'].includes(m?.durum)) {
+                await juriSureOturumLogunuGuncelle({durum:'puan_gonderme_engellendi_mac_kapali',
+                    hata:'Maç kapatılmış veya iptal edilmiş olduğu için jüri puanı gönderilmedi.',
+                    puanGonderildi:false,kayitId}).catch(logErr=>console.warn('Kapalı maç engeli günlüğü yazılamadı:',logErr));
+                return alert('Bu maç kapatılmış veya iptal edilmiştir. Puan gönderilmedi; durum yönetici günlüğüne bildirildi.');
+            }
 
             // Her jüri, kendi deterministik puan kayıt anahtarına yazar. Bütün kategori
             // kayıtlarını okumak veya kategori düğümüne toplu update göndermek gerekmez.
@@ -2609,7 +2706,8 @@ Devam edilsin mi?`)){
                 puanFirebaseDurumuYaz('error','⛔ Firebase puan yazımına izin vermedi. Puan gönderilmedi; 13 kriterli taslak bu cihazda korundu. Yetki sorunu çözülmeden bu kaydı gönderildi kabul etmeyin.',{
                     kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
                 });
-                alert('Firebase erişim yetkisi puan kaydını reddetti. Puan Firebase’e kaydedilmedi. Taslak bu ekranda ve cihazda korunuyor.');
+                await juriSureOturumLogunuGuncelle({durum:'puan_kayit_yetki_hatasi',hata:'Firebase erişim yetkisi puan kaydını reddetti. Puan Firebase’e kaydedilemedi.',firebaseHatasiKodu:code,puanGonderildi:false,kayitId}).catch(logErr=>console.warn('Yetki hatası yönetici günlüğüne yazılamadı:',logErr));
+                alert('Firebase erişim yetkisi puan kaydını reddetti. Puan Firebase’e kaydedilmedi. Taslak bu ekranda ve cihazda korunuyor; yönetici günlüğüne hata bildirildi.');
             }else{
                 try{
                     puaniKuyrugaEkle({kategori:secimler.kategori,macId:mac.id,kayitId,
@@ -2625,7 +2723,8 @@ Devam edilsin mi?`)){
                     puanFirebaseDurumuYaz('error','⛔ Firebase kaydı doğrulanamadı ve yerel kuyruk da yazılamadı. Puanlama ekranını kapatmayın; seçili 13 kriter hâlâ ekranda. Bağlantı/yetki kontrolü yapın.',{
                         kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
                     });
-                    alert('Puan Firebase’de doğrulanamadı ve yerel kuyruk yazılamadı. Ekranı kapatmayın; seçilen puanlar hâlâ formda.');
+                    await juriSureOturumLogunuGuncelle({durum:'puan_kayit_hatasi',hata:'Firebase kaydı doğrulanamadı ve yerel gönderim kuyruğu da yazılamadı: '+String(queueErr?.message||queueErr),puanGonderildi:false,kayitId}).catch(logErr=>console.warn('Kritik kayıt hatası yönetici günlüğüne yazılamadı:',logErr));
+                    alert('Puan Firebase’de doğrulanamadı ve yerel kuyruk yazılamadı. Ekranı kapatmayın; seçilen puanlar hâlâ formda. Hata yönetici günlüğüne bildirildi.');
                 }
                 // Hata durumunda öğrenci seçimini ve formu temizleme; jüri aynı puanları görebilsin.
             }
@@ -3329,6 +3428,38 @@ Devam edilsin mi?`)){
             throw new Error('Maç kaydının durumu eksik ve güvenli biçimde onarılamadı; puan ve süreler korunuyor.');
         return mac;
     }
+    function puanAktarimSorunuMu(v) {
+        const durum=String(v?.durum||'').toLocaleLowerCase('tr-TR');
+        if(durum.startsWith('puanlar_gonderildi')||durum==='basarili'||durum==='uygulandi')return false;
+        return durum.includes('engellendi')||durum.includes('hata')||durum.includes('kuyru')||
+            durum.includes('dogrulanamadi')||durum.includes('basarisiz')||durum.includes('kayit_cakismasi');
+    }
+    function canliPuanAktarimUyarilariniCiz(kayitlar) {
+        const host=document.getElementById('puanAktarimSorunlari');
+        if(!host)return;
+        const sorunlar=(kayitlar||[]).filter(puanAktarimSorunuMu)
+            .sort((a,b)=>Number(b.updatedAt||b.createdAt||b.clientAt||b.updatedClientAt||0)-
+                         Number(a.updatedAt||a.createdAt||a.clientAt||a.updatedClientAt||0));
+        if(!sorunlar.length){
+            host.innerHTML='<h3 style="margin:0 0 8px;color:var(--text-main);">✅ Jüri Puan Aktarımı</h3><div class="puanlama-bilgi">Son 200 denetim kaydında bekleyen veya başarısız puan aktarımı görünmüyor.</div>';
+            return;
+        }
+        const rows=sorunlar.slice(0,12).map(v=>{
+            const at=Number(v.updatedAt||v.createdAt||v.clientAt||v.updatedClientAt||0);
+            const tarih=at?new Date(at).toLocaleString('tr-TR'):'Tarih bekleniyor';
+            const durum=String(v.durum||'Kontrol gerekli');
+            const aciklama=v.hata||v.puanKuyrukHatasi||v.puanGondermeEngelNedeni||
+                (durum.includes('kuyru')?'Puan Firebase’de doğrulanmadı; kuyrukta bekliyor.':'Yönetici kontrolü gerekiyor.');
+            const mac=v.macEtiketi||v.macId||'Maç bilgisi yok';
+            const kisi=[v.okul,v.ogrenci].filter(Boolean).join(' · ')||'Öğrenci bilgisi yok';
+            return '<tr><td style="white-space:nowrap">'+htmlEscape(tarih)+'</td><td>'+htmlEscape(mac)+'</td><td>'+htmlEscape(kisi)+'</td><td>'+htmlEscape(v.juri||v.juriAd||'—')+'</td><td style="font-weight:800;color:#fca5a5">'+htmlEscape(durum)+'</td><td style="min-width:260px;white-space:normal">'+htmlEscape(aciklama)+'</td></tr>';
+        }).join('');
+        host.innerHTML='<h3 style="margin:0 0 8px;color:#fca5a5;">⚠ Jüri Puan Aktarımı · '+sorunlar.length+' bildirim</h3>'+
+            '<div class="puanlama-bilgi hata">Bu kayıtlar Firebase’e başarıyla kaydedilmiş ve doğrulanmış puanlar değildir. Maç sonuçlandırılmadan önce aşağıdaki kayıtları kontrol edin.</div>'+
+            '<div style="overflow:auto"><table class="tutanak-table" style="min-width:900px"><thead><tr><th>Tarih</th><th>Maç</th><th>Okul / Öğrenci</th><th>Jüri</th><th>Durum</th><th>Ayrıntı</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+            (sorunlar.length>12?'<div class="sure-hint">İlk 12 kayıt gösteriliyor. Ayrıntılar için Jüri / Süre İşlem Günlüğü bölümünü açın.</div>':'');
+    }
+
     function renderYoneticiCanliPanel() {
         if(!adminYetkiliMi())return alert('Yönetici yetkisi gerekiyor.');
         yoneticiMacGorunumu='aktif';
@@ -3343,6 +3474,7 @@ Devam edilsin mi?`)){
                     <button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this,'LİSE','canli')">LİSE</button>
                 </div>
                 <div id="liveMetrics" class="admin-summary-grid"></div>
+                <div id="puanAktarimSorunlari" class="kriter-card" style="margin:0 0 14px;"></div>
                 <div class="kriter-card"><h3 style="margin-top:0;color:var(--text-main);">Maçlar · Canlı Puanlar ve 3/3 Jüri Durumu</h3>
                   <div class="sure-hint"><b>Tek ana işlem: Sonucu Kesinleştir.</b> Üç jüri ve öğrenci kadrosu tam olduğunda puanlardan resmî galibi hesaplar, maçı kapatır ve jüri ekranlarına sonucu bir kez duyurur. Eşitlikte tamamlanmış konuşma süreleri kullanılır. Kadro doğrulanmadıysa manuel denetim açılır. <b>Geriye dönük süre düzeltmesi galibi değiştirmez.</b> Hükmen, iptal ve yönetici kararı istisnai/gelişmiş işlemlerdedir.</div>
                    <div class="live-filter-bar no-print"><input id="liveMatchSearch" placeholder="Maç numarası veya okul ara..." oninput="yoneticiTabloFiltresiniGuncelle()" aria-label="Maç ara"><label><input id="iptalGoster" type="checkbox" style="width:auto;margin:0 5px 0 0;" onchange="yoneticiTabloFiltresiniGuncelle()">İptal edilenleri göster</label></div>
@@ -3368,6 +3500,16 @@ Devam edilsin mi?`)){
         // Üst tur eşleşmeleri Firebase galipleri değiştiğinde canlı yenilenir.
         // Böylece yönetici panelini kapatıp açmaya gerek kalmaz.
         const currentKat=secimler.kategori;
+        const aktarimAuditRef=db.ref(`arsiv/juriSureOlaylari/${currentKat}`).limitToLast(200);
+        aktarimAuditRef.on('value',snap=>{
+            if(secimler.kategori!==currentKat||!document.getElementById('puanAktarimSorunlari'))return;
+            const kayitlar=[];snap.forEach(ch=>kayitlar.push({...ch.val(),logId:ch.key}));
+            canliPuanAktarimUyarilariniCiz(kayitlar);
+        },err=>{
+            const host=document.getElementById('puanAktarimSorunlari');
+            if(host)host.innerHTML='<h3 style="margin:0;color:#fca5a5;">⚠ Puan aktarım denetimi okunamadı</h3><div class="puanlama-bilgi hata">'+htmlEscape(err?.message||err)+'</div>';
+        });
+        aktifCanliPanelRefs.push(aktarimAuditRef);
         let sonYukleme=0;
         const canliEslesmeYenile=()=>{
             const surum=++sonYukleme;
