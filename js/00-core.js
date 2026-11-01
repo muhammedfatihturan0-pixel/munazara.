@@ -537,7 +537,7 @@
             const unread=puanBildirimOkunmamisSayisi();
             const badgeText=pending.length?String(pending.length):(unread?String(unread):'');
             bar.innerHTML='<div class="puan-guvence-main"><span class="puan-guvence-dot"></span><div class="puan-guvence-copy"><strong>'+htmlEscape(title)+'</strong><span>'+htmlEscape(message)+'</span></div></div>'+
-                '<div class="puan-guvence-actions"><span class="puan-guvence-connection '+(online?'is-online':'is-offline')+'">'+(online?'Firebase bağlı':'Firebase bağlantısı bekleniyor')+'</span><button type="button" class="bildirim-merkezi-button" onclick="bildirimMerkeziniAc()"><span aria-hidden="true">♧</span> Bildirimler '+(badgeText?'<b>'+badgeText+'</b>':'')+'</button></div>';
+                '<div class="puan-guvence-actions"><span class="puan-guvence-connection '+(online?'is-online':'is-offline')+'">'+(online?'Firebase bağlı':'Firebase bağlantısı bekleniyor')+'</span><button type="button" class="bildirim-merkezi-button" onclick="bildirimMerkeziniAc()"><span aria-hidden="true">🔔</span> Bildirimler '+(badgeText?'<b>'+badgeText+'</b>':'')+'</button></div>';
         }
         puanAnaMenuKartiniGuncelle();
     }
@@ -972,7 +972,7 @@
                         <span class="home-arrow">→</span>
                     </button>
                 </div>
-                <section class="home-juri-puan-card"><div class="home-juri-puan-intro"><span class="home-juri-puan-eyebrow">JÜRİ PUAN TAKİBİ</span><h2>Bildirim ve kayıt durumu</h2><p id="anaMenuPuanDurumu" class="home-puan-summary">Gönderim durumu yükleniyor…</p></div><div class="home-juri-puan-side"><div class="home-juri-puan-count"><strong id="anaMenuKuyrukSayisi">0</strong><span>Bekleyen puan</span></div><div class="home-juri-puan-actions"><button type="button" class="home-notification-primary" onclick="bildirimMerkeziniAc()">♧ Bildirim Merkezi</button><button type="button" onclick="juriPuanGecmisiniAc()">Puan geçmişim</button></div></div></section><div class="home-foot"><span>Fikstür ve jüri puanları merkezi Firebase üzerinde tutulur.</span><button onclick="renderHakkinda()">Uygulama Hakkında →</button></div>
+                <section class="home-juri-puan-card"><div class="home-juri-puan-intro"><span class="home-juri-puan-eyebrow">JÜRİ PUAN TAKİBİ</span><h2>Bildirim ve kayıt durumu</h2><p id="anaMenuPuanDurumu" class="home-puan-summary">Gönderim durumu yükleniyor…</p></div><div class="home-juri-puan-side"><div class="home-juri-puan-count"><strong id="anaMenuKuyrukSayisi">0</strong><span>Bekleyen puan</span></div><div class="home-juri-puan-actions"><button type="button" class="home-notification-primary" onclick="bildirimMerkeziniAc()">🔔 Bildirim Merkezi</button><button type="button" onclick="juriPuanGecmisiniAc()">Puan geçmişim</button></div></div></section><div class="home-foot"><span>Fikstür ve jüri puanları merkezi Firebase üzerinde tutulur.</span><button onclick="renderHakkinda()">Uygulama Hakkında →</button></div>
             </main>`;
         puanFirebaseDurumuGoster();
     }
