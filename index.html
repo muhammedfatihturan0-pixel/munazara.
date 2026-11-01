@@ -926,6 +926,7 @@
                     if (code.includes('permission')) q[key].queueStatus = 'yetki_hatasi';
                     else if(String(err?.message||'').includes('daha yeni bir kayıt')) q[key].queueStatus='kayit_cakismasi';
                     else q[key].queueStatus = 'dogrulama_bekliyor';
+                    degisti = true;
                     await puanAktarimDenetiminiGuncelle(item,{
                         durum:code.includes('permission')?'puan_kuyruk_yetki_hatasi':'puan_kuyruk_senkron_hatasi',
                         hata:String(err?.message||err),queueStatus:q[key].queueStatus,
