@@ -1,5 +1,5 @@
 
-    const APP_VERSION = '3.38 · Bildirim Merkezi ve Jüri Puan Takibi';
+    const APP_VERSION = '3.40 · Yönetici Paneli, Manuel BAY ve Akıllı Jüri Arayüzü';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -34,6 +34,13 @@
 
     function htmlEscape(v) {
         return String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    }
+
+    function base64Utf8Coz(b64) {
+        const raw = atob(b64);
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        return new TextDecoder('utf-8').decode(bytes);
     }
 
     function hash32(str, seed=2166136261) {
@@ -233,6 +240,7 @@
         if(!Object.keys(restored).length){
             const d=document.getElementById('puanTaslakDurumu');
             if(d)d.textContent='Taslak yedekleme hazır: her kriter seçimi otomatik saklanır.';
+            if(typeof puanlamaIlerlemesiniGuncelle==='function')puanlamaIlerlemesiniGuncelle();
             return;
         }
         verilenPuanlar=restored;
@@ -244,6 +252,7 @@
             });
         });
         try{localStorage.setItem(ctx.localKey,JSON.stringify(veri));}catch(_){}
+        if(typeof puanlamaIlerlemesiniGuncelle==='function')puanlamaIlerlemesiniGuncelle();
         const d=document.getElementById('puanTaslakDurumu');
         if(d)d.textContent=`↩ ${Object.keys(restored).length}/13 kriter ${kaynak} yedeğinden geri yüklendi.`;
     }
@@ -511,34 +520,13 @@
     }
 
     function puanDurumPaneliniKur(){
-        if(!document.body)return null;
-        let el=document.getElementById('puanGuvenceBar');
-        if(!el){el=document.createElement('section');el.id='puanGuvenceBar';el.className='puan-guvence-bar';el.setAttribute('aria-live','polite');document.body.prepend(el);}
-        return el;
+        // Bildirimler artık geniş üst bantta değil, yönetici ekran gezinmesindeki zil düğmesinde açılır.
+        return document.getElementById('puanGuvenceBar');
     }
     function puanDurumPaneliniGuncelle(){
-        const bar=puanDurumPaneliniKur();
-        const pending=Object.values(offlineKuyrukGetir()).filter(x=>x&&x.kayit);
-        const durum=puanFirebaseAnlikDurum||puanFirebaseDurumuOku();
-        const online=navigator.onLine&&firebaseBagli;
-        let level='neutral',title='Puan gönderim durumu',message='';
-        if(pending.length){
-            const problem=pending.some(x=>['yetki_hatasi','mac_kapali','mac_iptal','sure_engeli_arsiv_bekliyor'].includes(x.queueStatus)||x.lastError);
-            level=problem?'error':'warning';title=problem?'İncelenmesi gereken puan var':'Gönderim kuyruğunda puan var';
-            message=pending.length+' puan bu cihazda bekliyor; Firebase’den doğrulanmadan başarılı sayılmaz.';
-        }else if(durum?.durum==='success'){
-            level='success';title='Son puan gönderimi doğrulandı';message=String(durum.mesaj||'Firebase geri okuma doğrulaması başarılı.')+' · '+puanDurumTarihiYaz(durum.updatedAt);
-        }else if(durum?.durum==='error'){
-            level='error';title='Son puan gönderiminde hata';message=String(durum.mesaj||'Puan gönderimi doğrulanamadı.')+' · '+puanDurumTarihiYaz(durum.updatedAt);
-        }else if(durum?.mesaj){level='warning';title='Son puan gönderim durumu';message=String(durum.mesaj)+' · '+puanDurumTarihiYaz(durum.updatedAt);}
-        else message='Bu cihazda bekleyen puan yok. Henüz gönderim geçmişi bulunmuyor.';
-        if(bar){
-            bar.className='puan-guvence-bar durum-'+level;
-            const unread=puanBildirimOkunmamisSayisi();
-            const badgeText=pending.length?String(pending.length):(unread?String(unread):'');
-            bar.innerHTML='<div class="puan-guvence-main"><span class="puan-guvence-dot"></span><div class="puan-guvence-copy"><strong>'+htmlEscape(title)+'</strong><span>'+htmlEscape(message)+'</span></div></div>'+
-                '<div class="puan-guvence-actions"><span class="puan-guvence-connection '+(online?'is-online':'is-offline')+'">'+(online?'Firebase bağlı':'Firebase bağlantısı bekleniyor')+'</span><button type="button" class="bildirim-merkezi-button" onclick="bildirimMerkeziniAc()"><span aria-hidden="true">🔔</span> Bildirimler '+(badgeText?'<b>'+badgeText+'</b>':'')+'</button></div>';
-        }
+        const old=document.getElementById('puanGuvenceBar');
+        if(old)old.remove();
+        if(typeof ustGezinmeyiGuncelle==='function')ustGezinmeyiGuncelle();
         puanAnaMenuKartiniGuncelle();
     }
     function puanFirebaseDurumuGoster(){
@@ -569,17 +557,25 @@
         host.className='home-puan-summary'+(pending.length?' has-pending':(durum?.durum==='success'?' is-success':''));
         const count=document.getElementById('anaMenuKuyrukSayisi');if(count)count.textContent=String(pending.length);
     }
+    let puanGuvenceModalSurum=0;
+    let turnuvaBaySecimResolver=null;
     function puanGuvenceModaliniKapat(){
+        puanGuvenceModalSurum++;
+        if(typeof turnuvaBaySecimResolver==='function'){
+            const resolve=turnuvaBaySecimResolver;turnuvaBaySecimResolver=null;resolve(null);
+        }
         const el=document.getElementById('puanGuvenceModal');if(el)el.remove();
     }
     function puanGuvenceModaliniAc(baslik,icerik){
         puanGuvenceModaliniKapat();
+        const token=++puanGuvenceModalSurum;
         const root=document.createElement('div');root.id='puanGuvenceModal';root.className='puan-guvence-overlay';
         root.innerHTML='<div class="puan-guvence-modal" role="dialog" aria-modal="true" aria-label="'+htmlEscape(baslik)+'">'+
             '<div class="puan-guvence-modal-head"><h2>'+htmlEscape(baslik)+'</h2><button type="button" aria-label="Kapat" onclick="puanGuvenceModaliniKapat()">✕</button></div>'+
             '<div class="puan-guvence-modal-body">'+icerik+'</div></div>';
         root.addEventListener('click',ev=>{if(ev.target===root)puanGuvenceModaliniKapat();});
         document.body.appendChild(root);
+        return token;
     }
     function puanKriterDetayiHtml(kayit){
         const p=kayit?.puanlar||{};
@@ -613,13 +609,14 @@
     }
     async function juriPuanGecmisiniAc(){
         const clientId=getClientId();
-        puanGuvenceModaliniAc('Gönderdiğim puanlar','<div class="puan-guvence-empty">Bu cihazın geçmiş kayıtları Firebase’den okunuyor…</div>');
+        const modalToken=puanGuvenceModaliniAc('Gönderdiğim puanlar','<div class="puan-guvence-empty">Bu cihazın geçmiş kayıtları Firebase’den okunuyor…</div>');
         try{
             const cats=['ORTAOKUL','LİSE'];
             const snapshots=await Promise.all(cats.map(async kategori=>{
                 const values=await Promise.all([db.ref('puanlar/'+kategori).once('value'),db.ref('arsiv/juriPuanYedekleri/'+kategori).once('value')]);
                 return {kategori,live:values[0],archive:values[1]};
             }));
+            if(modalToken!==puanGuvenceModalSurum||!document.getElementById('puanGuvenceModal'))return;
             const rows=[],seen=new Set();
             const add=(kategori,macId,key,record,source,state)=>{
                 if(!record?.secim||!record?.puanlar)return;
@@ -989,7 +986,7 @@
                         <span class="home-arrow">→</span>
                     </button>
                 </div>
-                <section class="home-juri-puan-card"><div class="home-juri-puan-intro"><span class="home-juri-puan-eyebrow">JÜRİ PUAN TAKİBİ</span><h2>Bildirim ve kayıt durumu</h2><p id="anaMenuPuanDurumu" class="home-puan-summary">Gönderim durumu yükleniyor…</p></div><div class="home-juri-puan-side"><div class="home-juri-puan-count"><strong id="anaMenuKuyrukSayisi">0</strong><span>Bekleyen puan</span></div><div class="home-juri-puan-actions"><button type="button" class="home-notification-primary" onclick="bildirimMerkeziniAc()">🔔 Bildirim Merkezi</button><button type="button" onclick="juriPuanGecmisiniAc()">Puan geçmişim</button></div></div></section><div class="home-foot"><span>Fikstür ve jüri puanları merkezi Firebase üzerinde tutulur.</span><button onclick="renderHakkinda()">Uygulama Hakkında →</button></div>
+<div class="home-foot"><span>Fikstür ve jüri puanları merkezi Firebase üzerinde tutulur.</span><button onclick="renderHakkinda()">Uygulama Hakkında →</button></div>
             </main>`;
         puanFirebaseDurumuGoster();
     }
@@ -1181,23 +1178,54 @@
         if(!adminYetkiliMi()) return sifreliModulKontrol('yonetici');
         dinleyicileriTemizle();
         document.getElementById('app').innerHTML = `
-            <main class="home-shell admin-menu-shell">
-                <header class="home-head"><div class="home-eyebrow">Yetkili alanı</div><h1>Yönetici Modülü</h1><p>İşlem yapmak istediğiniz bölümü seçin.</p></header>
-                <div class="home-grid">
-                    <button class="home-link primary" onclick="renderYoneticiCanliPanel()"><span><span class="home-card-title">✅ Maç Yönetimi</span><span class="home-card-desc">Jüri puanlarını canlı izle, sonuçları kesinleştir, fikstürle eşleştir veya maçı yeniden aç.</span></span><span class="home-arrow">→</span></button>
-                    <button class="home-link" onclick="yoneticiManuelMacEkleEkraniAc()"><span><span class="home-card-title">＋ Yeni / Manuel Maç Oluştur</span><span class="home-card-desc">İstediğiniz iki okulu seçerek yeni maç oluşturun; jüri ve süre modüllerinde görünür.</span></span><span class="home-arrow">→</span></button>
-                    <button class="home-link" onclick="renderTurnuva()"><span><span class="home-card-title">📅 Fikstür ve Görevlendirmeler</span><span class="home-card-desc">Maç takvimi, jüri ve öğretmen görevlendirmeleri, resmî listeler.</span></span><span class="home-arrow">→</span></button>
-                    <button class="home-link" onclick="renderFiksturIstisnaYonetimi()"><span><span class="home-card-title">🔄 Fikstür İstisnaları</span><span class="home-card-desc">Yönetici: okulu değiştir, maçı boş seansa taşı veya 35 numaralı boş maçı doldur.</span></span><span class="home-arrow">→</span></button>
-                     <button class="home-link" onclick="showReport()"><span><span class="home-card-title">📊 Özel Sonuçlar ve Tutanak</span><span class="home-card-desc">Öğrenci/jüri puanları, Excel ve tek maça odaklı kompakt A4 yatay PDF.</span></span><span class="home-arrow">→</span></button>
-                    <button class="home-link" onclick="renderOgrenci()"><span><span class="home-card-title">🏫 Okullar ve Öğrenciler</span><span class="home-card-desc">Öğrenci kayıtları, okul/öğrenci adı düzenleme, Excel aktarma ve gerektiğinde liste eşleştirme.</span></span><span class="home-arrow">→</span></button>
-                    <button class="home-link" onclick="renderJuriSureLoglari()"><span><span class="home-card-title">🧾 Jüri / Süre İşlem Günlüğü</span><span class="home-card-desc">Puanlama ekranı açılışlarını, süre aşımı engellerini ve isteğe bağlı sıfırlama işlemlerini; başarı/iptal durumlarıyla birlikte görüntüle.</span></span><span class="home-arrow">→</span></button>
-                    <button class="home-link" onclick="renderVeriKurtarma()"><span><span class="home-card-title">🛟 Puan ve Süre Yedekleri</span><span class="home-card-desc">Eksik jüri puanlarını, öğrenci sayaçlarını ve maç süre toplamlarını yedeklerden mevcut kayıtların üzerine yazmadan kurtar.</span></span><span class="home-arrow">→</span></button>
+            <main class="home-shell admin-menu-shell admin-dashboard">
+                <header class="home-head admin-dashboard-head">
+                    <div>
+                        <div class="home-eyebrow">YETKİLİ ALANI</div>
+                        <h1>Yönetici Paneli</h1>
+                        <p>Turnuva yönetimi, maç planlama, jüri ve puan işlemleri.</p>
+                    </div>
+                    <div class="admin-dashboard-head-note">🔔 Bildirimler sağ üstteki zil menüsünde</div>
+                </header>
+
+                <div class="admin-dashboard-groups">
+                    <section class="admin-dashboard-group group-tournament">
+                        <header><span class="admin-group-icon">🏆</span><div><h2>Turnuva Planlama</h2><p>Maçların ve resmî takvimin yönetimi</p></div></header>
+                        <div class="admin-tool-grid">
+                            <button class="admin-tool-card primary" onclick="renderYoneticiCanliPanel()"><span class="admin-tool-icon">🏆</span><span><b>Maç Yönetimi</b><small>Jüri puanlarını izle, sonuçları kesinleştir ve maçları yönet.</small></span><i>→</i></button>
+                            <button class="admin-tool-card" onclick="yoneticiManuelMacEkleEkraniAc()"><span class="admin-tool-icon">＋</span><span><b>Yeni / Manuel Maç</b><small>İki okul seçerek yeni karşılaşma oluştur.</small></span><i>→</i></button>
+                            <button class="admin-tool-card" onclick="renderTurnuva()"><span class="admin-tool-icon">📅</span><span><b>Fikstür ve Görevlendirmeler</b><small>Maç takvimi, jüri ve öğretmen görevlendirmeleri.</small></span><i>→</i></button>
+                        </div>
+                        <details class="admin-advanced-tools">
+                            <summary>İleri düzey fikstür işlemleri</summary>
+                            <p>Boş #35 karşılaşmasını rakiple eşleştirme veya fikstürde zorunlu bir düzeltme gerektiğinde kullanın.</p>
+                            <button type="button" onclick="renderFiksturIstisnaYonetimi()">Özel eşleştirme ve manuel BAY ataması →</button>
+                        </details>
+                    </section>
+
+                    <section class="admin-dashboard-group group-participants">
+                        <header><span class="admin-group-icon">👥</span><div><h2>Katılımcı Yönetimi</h2><p>Okullar, öğrenciler ve jüri işlemleri</p></div></header>
+                        <div class="admin-tool-grid">
+                            <button class="admin-tool-card" onclick="renderOgrenci()"><span class="admin-tool-icon">🏫</span><span><b>Okullar ve Öğrenciler</b><small>Öğrenci kayıtları, ad düzenleme ve Excel aktarma.</small></span><i>→</i></button>
+                            <button class="admin-tool-card" onclick="renderJuriSureLoglari()"><span class="admin-tool-icon">🧾</span><span><b>Jüri / Süre İşlem Günlüğü</b><small>Puan gönderimleri, süre engelleri ve işlem geçmişi.</small></span><i>→</i></button>
+                        </div>
+                    </section>
+
+                    <section class="admin-dashboard-group group-results">
+                        <header><span class="admin-group-icon">📊</span><div><h2>Puan ve Sonuçlar</h2><p>Değerlendirme, yedek ve raporlar</p></div></header>
+                        <div class="admin-tool-grid">
+                            <button class="admin-tool-card" onclick="renderVeriKurtarma()"><span class="admin-tool-icon">🛟</span><span><b>Puan ve Süre Yedekleri</b><small>Eksik kayıtları mevcut verinin üzerine yazmadan kurtar.</small></span><i>→</i></button>
+                            <button class="admin-tool-card" onclick="showReport()"><span class="admin-tool-icon">📄</span><span><b>Özel Sonuçlar ve Tutanak</b><small>Jüri/öğrenci puanları, Excel ve PDF raporları.</small></span><i>→</i></button>
+                        </div>
+                    </section>
                 </div>
-                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
+
+                <div class="admin-dashboard-footer">
                     <button class="btn" style="width:auto;min-width:170px;" onclick="anaMenu()">← Ana Menü</button>
-                    <button class="btn" style="width:auto;min-width:170px;background:#7f1d1d;" onclick="yoneticiOturumunuKapat()">🔒 Yönetici Çıkışı</button>
+                    <button class="btn admin-exit-button" style="width:auto;min-width:170px;" onclick="yoneticiOturumunuKapat()">🔒 Yönetici Çıkışı</button>
                 </div>
             </main>`;
+        puanFirebaseDurumuGoster();
     }
 
     async function juriPuanArsivGecmisiniYukle(){

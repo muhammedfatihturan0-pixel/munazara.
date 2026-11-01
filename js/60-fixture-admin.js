@@ -2,14 +2,6 @@
     // ProgramOlusturma.html uygulamasi izolasyon icin iframe srcdoc icinde calisir.
     // Bu sayede kendi CSS/JS/localStorage anahtarlari ana puanlama arayuzuyle cakisma yapmaz.
 
-    function base64Utf8Coz(b64) {
-        const raw = atob(b64);
-        const bytes = new Uint8Array(raw.length);
-        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-        return new TextDecoder('utf-8').decode(bytes);
-    }
-
-
     // Yönetici dışındaki jüri ekranını değiştirmeden resmî ilk turda kontrollü istisna.
     const FIKSTUR_ISTISNA_YOLU='fikstur/tekSalon_2026_2027';
     const FIKSTUR_ISTISNA_SEANSLAR=['08:45 - 10:00','10:15 - 11:30','13:30 - 14:45','15:00 - 16:15'];
@@ -38,8 +30,10 @@
         <div id="fIstEski" class="puanlama-bilgi" style="margin-top:10px;"></div>
         <div id="fIstUstTurEslestirme" style="display:none;margin:10px 0;padding:12px;border:1px solid var(--border);border-radius:8px;">
           <label class="puanlama-etiket">Şehit Öğretmen Şevki Akgün'ün 2. turdaki rakibi</label>
-          <select id="fIstR2Rakip" style="width:100%;padding:10px;border-radius:7px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);"></select>
-          <div id="fIstR2Bilgi" class="sure-hint">Rakip, 1. tur galipleri arasından seçilir.</div>
+          <select id="fIstR2Rakip" onchange="fiksturIstisnaFormunuGuncelle()" style="width:100%;padding:10px;border-radius:7px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);"></select>
+          <label class="puanlama-etiket" style="margin-top:10px;">2. turda manuel BAY verilecek okul</label>
+          <select id="fIstR2Bay" style="width:100%;padding:10px;border-radius:7px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);"></select>
+          <div id="fIstR2Bilgi" class="sure-hint">Rakip ve BAY alacak okul yönetici tarafından ayrı ayrı seçilir. Otomatik kura yapılmaz.</div>
         </div>
         <div id="fIstOkulAlanlari">
           <label class="puanlama-etiket">Hükümet okulu</label><input id="fIstHuk" list="fIstOkullar" autocomplete="off" placeholder="Okul adı">
@@ -85,40 +79,49 @@
     }
     function fiksturIstisnaFormunuGuncelle(){
       const op=document.getElementById('fIstTur')?.value,kat=document.getElementById('fIstKategori')?.value;
-      const listEl=document.getElementById('fIstMac'); if(!listEl)return;
+      const listEl=document.getElementById('fIstMac');if(!listEl)return;
       const prev=listEl.value;
-      const matches=fiksturIstisnaListe.filter(m=>(op==='add'||op==='pair')?(m.no===35 && (m.isPending||m.isEmpty)):(m.cat===(kat==='LİSE'?'lise':'ortaokul') && !m.isEmpty && m.roundTitle==='1. Eleme Turu'));
-      listEl.innerHTML=matches.map(m=>`<option value="${m.no}">#${m.no} · ${htmlEscape(m.team1)} / ${htmlEscape(m.team2)}</option>`).join('');
+      const matches=fiksturIstisnaListe.filter(m=>(op==='add'||op==='pair')?(m.no===35&&(m.isPending||m.isEmpty)):(m.cat===(kat==='LİSE'?'lise':'ortaokul')&&!m.isEmpty&&m.roundTitle==='1. Eleme Turu'));
+      listEl.innerHTML=matches.map(m=>'<option value="'+m.no+'">#'+m.no+' · '+htmlEscape(m.team1)+' / '+htmlEscape(m.team2)+'</option>').join('');
       if(matches.some(m=>String(m.no)===prev))listEl.value=prev;
       if(op==='add'||op==='pair')document.getElementById('fIstKategori').value='ORTAOKUL';
       const m=matches.find(m=>String(m.no)===listEl.value);
       const status=document.getElementById('fIstEski');
-      if(status)status.textContent=m?(op==='bye'?`#${m.no} · Rakipsiz okul: ${m.team1==='BOŞ'?m.team2:m.team1} · Onaylanırsa 2. Eleme Turu'na BYE ile aktarılır.`:`#${m.no} · ${m.dateStr} · ${m.time} · ${m.team1} / ${m.team2}`):'Bu işlem için uygun boş maç bulunamadı.';
+      if(status)status.textContent=m?(op==='bye'?'#'+m.no+' · Rakipsiz okul: '+(m.team1==='BOŞ'?m.team2:m.team1)+' · Onaylanırsa 2. Eleme Turu\'na BYE ile aktarılır.':'#'+m.no+' · '+m.dateStr+' · '+m.time+' · '+m.team1+' / '+m.team2):'Bu işlem için uygun boş maç bulunamadı.';
       const schools=new Set([...Object.keys(fiksturIstisnaOkullar[document.getElementById('fIstKategori').value]||{}),...fiksturIstisnaListe.filter(m=>m.cat===(document.getElementById('fIstKategori').value==='LİSE'?'lise':'ortaokul')).flatMap(m=>[m.team1,m.team2])]);
-      schools.delete('BOŞ');document.getElementById('fIstOkullar').innerHTML=[...schools].sort((a,b)=>a.localeCompare(b,'tr')).map(x=>`<option value="${htmlEscape(x)}"></option>`).join('');
+      schools.delete('BOŞ');
+      document.getElementById('fIstOkullar').innerHTML=[...schools].sort((a,b)=>a.localeCompare(b,'tr')).map(x=>'<option value="'+htmlEscape(x)+'"></option>').join('');
       document.getElementById('fIstOkulAlanlari').style.display=(op==='move'||op==='pair')?'none':'block';
       document.getElementById('fIstZamanAlanlari').style.display=(op==='replace'||op==='pair')?'none':'block';
       const r2Box=document.getElementById('fIstUstTurEslestirme');
       const r2Select=document.getElementById('fIstR2Rakip');
+      const byeSelect=document.getElementById('fIstR2Bay');
       if(r2Box)r2Box.style.display=op==='pair'?'block':'none';
-      if(op==='pair'&&r2Select){
-        const keep=r2Select.value;
+      if(op==='pair'&&r2Select&&byeSelect){
+        const keepOpponent=r2Select.value,keepBye=byeSelect.value;
         const raw=fiksturIstisnaState?.winners||{};
         const m35=fiksturIstisnaListe.find(x=>x.no===35);
         const school=m35?(m35.team1==='BOŞ'?m35.team2:m35.team1):'';
-        const previousBays=Object.entries(fiksturIstisnaState?.bayDraws||{}).filter(([k])=>k!=='orta_r2').map(([,v])=>fiksturIstisnaNorm(v));
-        const winners=Array.from({length:24},(_,i)=>11+i).map(no=>({no,school:raw[no]}))
-          .filter(x=>x.school&&fiksturIstisnaNorm(x.school)!==fiksturIstisnaNorm(school)&&!previousBays.includes(fiksturIstisnaNorm(x.school)));
+        const previousBays=Object.entries(fiksturIstisnaState?.bayDraws||{})
+          .filter(([k])=>k!=='orta_r2').map(([,v])=>fiksturIstisnaNorm(v));
+        const candidates=Array.from({length:24},(_,i)=>({no:11+i,school:raw[11+i]}))
+          .filter(x=>x.school&&fiksturIstisnaNorm(x.school)!==fiksturIstisnaNorm(school)&&
+            !previousBays.includes(fiksturIstisnaNorm(x.school)));
         r2Select.innerHTML='<option value="">1. tur galiplerinden rakip seçiniz</option>'+
-          winners.map(x=>'<option value="'+x.no+'">#'+x.no+' maç galibi · '+htmlEscape(x.school)+'</option>').join('');
-        if(winners.some(x=>String(x.no)===keep))r2Select.value=keep;
+          candidates.map(x=>'<option value="'+x.no+'">#'+x.no+' maç galibi · '+htmlEscape(x.school)+'</option>').join('');
+        if(candidates.some(x=>String(x.no)===keepOpponent))r2Select.value=keepOpponent;
+        const chosenOpponent=Number(r2Select.value);
+        const byeCandidates=candidates.filter(x=>x.no!==chosenOpponent);
+        byeSelect.innerHTML='<option value="">BAY alacak okulu kendiniz seçiniz</option>'+
+          byeCandidates.map(x=>'<option value="'+x.no+'">#'+x.no+' maç galibi · '+htmlEscape(x.school)+'</option>').join('');
+        if(byeCandidates.some(x=>String(x.no)===keepBye))byeSelect.value=keepBye;
         const hint=document.getElementById('fIstR2Bilgi');
-        if(hint)hint.textContent='1. turdaki 24 maçın galipleri arasından rakip seçilir. 25 takım olacağı için başka bir uygun takım BAY alacak; Şevki Akgün gerçek maç yapacak.';
-        if(r2Select.options.length===1&&hint)hint.textContent='Henüz seçilebilir kesinleşmiş 1. tur galibi yok. Maç sonuçları geldikçe liste dolacak.';
+        if(hint)hint.textContent='İki seçim de yönetici tarafından yapılır. Daha önce BAY almış okullar tekrar önerilmez; sistem rastgele BAY atamaz.';
+        if(!candidates.length&&hint)hint.textContent='Henüz seçilebilir kesinleşmiş 1. tur galibi bulunmuyor.';
+        else if(chosenOpponent&&!byeCandidates.length&&hint)hint.textContent='BAY için uygun başka bir 1. tur galibi bulunamadı; işlem yapılamaz.';
       }
       const huk=document.getElementById('fIstHuk'),muh=document.getElementById('fIstMuh'),date=document.getElementById('fIstTarih'),time=document.getElementById('fIstSeans');
-      // Aynı maçın tekrar seçilmesinde kullanıcı düzenlemesini ezmemek için kaynak değişince doldur.
-      const key=`${op}:${m?.no||0}`;
+      const key=op+':'+(m?.no||0);
       if(window._fIstLastSource!==key){
         if(huk)huk.value=(m?.team1==='BOŞ'||m?.isEmpty)?'':m?.team1||'';
         if(muh)muh.value=(m?.team2==='BOŞ'||m?.isEmpty)?'':m?.team2||'';
@@ -128,15 +131,16 @@
       }
     }
 
-    async function fiksturRakipsizOkuluUstTurdaEslestir(m,opponentMatchNo,reason){
+    async function fiksturRakipsizOkuluUstTurdaEslestir(m,opponentMatchNo,byeMatchNo,reason){
       if(!adminYetkiliMi()||!firebaseBagli||!navigator.onLine)throw new Error('Çevrimiçi yönetici yetkisi gerekli.');
       if(!m||Number(m.no)!==35||m.cat!=='ortaokul'||!m.isPending)throw new Error('Bu işlem yalnızca rakibi belirlenmemiş ortaokul #35 için kullanılabilir.');
       const realSchool=x=>!!x&&!['boş','bay'].includes(fiksturIstisnaNorm(x));
       const school=[m.team1,m.team2].find(realSchool);
       if(!school)throw new Error('35. maçta gerçek okul bulunamadı.');
       if(reason.length<12)throw new Error('Gerekçe en az 12 karakter olmalıdır.');
-      const opponentNo=Number(opponentMatchNo);
-      if(!Number.isInteger(opponentNo)||opponentNo<11||opponentNo>34)throw new Error('Geçerli bir 1. tur galibi seçiniz.');
+      const opponentNo=Number(opponentMatchNo),byeNo=Number(byeMatchNo);
+      if(!Number.isInteger(opponentNo)||opponentNo<11||opponentNo>34)throw new Error('Geçerli bir rakip maç galibi seçiniz.');
+      if(!Number.isInteger(byeNo)||byeNo<11||byeNo>34||byeNo===opponentNo)throw new Error('Rakipten farklı, geçerli bir BAY alacak okul seçiniz.');
       const macId=macKimligiOlustur('ORTAOKUL',m.team1,m.team2);
       const [currentSnap,scoreSnap,matchSnap]=await Promise.all([
         db.ref(FIKSTUR_ISTISNA_YOLU).once('value'),
@@ -149,32 +153,37 @@
       if(scored||matchSnap.val()?.sonuc)throw new Error('35. maçta puan veya sonuç kaydı var. Puanlı karşılaşma yeniden eşleştirilemez.');
       if(current.winners?.[35]&&current.winners[35]!==school)throw new Error('35. maçta farklı bir galip kayıtlı.');
       if(current.finalizedMatches?.[35])throw new Error('35. maçta kesinleşmiş sonuç kaydı var.');
+      if(current.bayDraws?.orta_r2||current.roundPairings?.orta_r2)
+        throw new Error('2. tur eşleşmesi/BAY ataması daha önce kaydedilmiş. Mevcut atamanın üzerine yazılmadı.');
       const winners=current.winners||{};
       const firstRoundWinners=Array.from({length:24},(_,i)=>({no:11+i,school:winners[11+i]}));
       if(firstRoundWinners.some(x=>!x.school))throw new Error('Önce ortaokul 1. turdaki 24 maçın tamamının galibi kesinleşmeli.');
       const opponent=firstRoundWinners.find(x=>x.no===opponentNo)?.school;
-      if(!opponent)throw new Error('Seçilen 1. tur galibi artık mevcut değil; listeyi yenileyin.');
-      if(fiksturIstisnaNorm(opponent)===fiksturIstisnaNorm(school))throw new Error('Okul kendisiyle eşleştirilemez.');
+      const byeTeam=firstRoundWinners.find(x=>x.no===byeNo)?.school;
+      if(!opponent||!byeTeam)throw new Error('Seçilen rakip veya BAY alacak takım artık mevcut değil; listeyi yenileyin.');
+      if(fiksturIstisnaNorm(opponent)===fiksturIstisnaNorm(school)||fiksturIstisnaNorm(byeTeam)===fiksturIstisnaNorm(school))
+        throw new Error('Rakipsiz okul kendisiyle eşleştirilemez veya kendisine BAY verilemez.');
+      if(fiksturIstisnaNorm(byeTeam)===fiksturIstisnaNorm(opponent))
+        throw new Error('Bir okul aynı turda hem rakip hem BAY alacak takım olamaz.');
       const previousBays=Object.entries(current.bayDraws||{}).filter(([k])=>k!=='orta_r2').map(([,v])=>fiksturIstisnaNorm(v));
-      if(previousBays.includes(fiksturIstisnaNorm(opponent)))throw new Error('Seçilen rakip daha önce BAY kullanmış; başka bir rakip seçin.');
+      if(previousBays.includes(fiksturIstisnaNorm(opponent)))
+        throw new Error('Seçilen rakip daha önce BAY kullanmış; sonraki turda rakibi olmalı.');
+      if(previousBays.includes(fiksturIstisnaNorm(byeTeam)))
+        throw new Error('Seçilen BAY takımı daha önce BAY kullanmış; başka bir okul seçin.');
       const later=Object.keys(winners).some(x=>Number(x)>=41&&Number(x)<=53)||
         Object.keys(current.finalizedMatches||{}).some(x=>Number(x)>=41&&Number(x)<=53)||
         ['orta_r3','orta_r4','orta_sf'].some(x=>!!current.bayDraws?.[x]);
       if(later)throw new Error('Ortaokul 2. tur veya sonraki turlarda sonuç/BAY kaydı var. Fikstür güvenliği için eşleşme değiştirilemez.');
-      const byeCandidates=firstRoundWinners.map(x=>x.school)
-        .filter(x=>fiksturIstisnaNorm(x)!==fiksturIstisnaNorm(opponent)&&!previousBays.includes(fiksturIstisnaNorm(x)));
-      if(!byeCandidates.length)throw new Error('Şevki Akgün ve seçilen rakip dışında BAY verilebilecek uygun takım bulunamadı.');
-      const byeTeam=byeCandidates[Math.floor(Math.random()*byeCandidates.length)];
       const display='#35 · '+school+'\n2. tur rakibi: #'+opponentNo+' galibi · '+opponent+
-        '\nDiğer BAY hakkı: '+byeTeam+'\nGerekçe: '+reason+
-        '\n\nŞevki Akgün gerçek bir 2. tur maçı yapacak. BAY, kalan takımlardan birine kura ile verilecek.';
-      if(!confirm('2. TUR EŞLEŞMESİNİ ONAYLA\n\n'+display+'\nDevam edilsin mi?'))return;
+        '\n2. tur BAY alacak okul: #'+byeNo+' galibi · '+byeTeam+
+        '\nGerekçe: '+reason+'\n\nRakip ve BAY ataması yönetici seçimiyle kaydedilecek; rastgele BAY yapılmayacak.';
+      if(!confirm('2. TUR EŞLEŞMESİ VE BAY ATAMASINI ONAYLA\n\n'+display+'\nDevam edilsin mi?'))return;
       const auditRef=db.ref('arsiv/fiksturDegisiklikleri/'+Date.now()+'_35_pair');
-      await auditRef.set({before:current,school,opponent,opponentMatchNo:opponentNo,byeTeam,reason,operation:'yonetici_2_tur_eslestirme',createdAt:firebase.database.ServerValue.TIMESTAMP});
+      await auditRef.set({before:current,school,opponent,opponentMatchNo:opponentNo,byeTeam,byeMatchNo:byeNo,reason,operation:'yonetici_2_tur_eslestirme',createdAt:firebase.database.ServerValue.TIMESTAMP});
       const result=await db.ref(FIKSTUR_ISTISNA_YOLU).transaction(cur=>{
         if(!cur||!cur.juries||!cur.topics||cur.updatedAt!==current.updatedAt)return;
         if(cur.winners?.[35]&&cur.winners[35]!==school)return;
-        if(cur.finalizedMatches?.[35])return;
+        if(cur.finalizedMatches?.[35]||cur.bayDraws?.orta_r2||cur.roundPairings?.orta_r2)return;
         if(Object.keys(cur.winners||{}).some(x=>Number(x)>=41&&Number(x)<=53)||
            Object.keys(cur.finalizedMatches||{}).some(x=>Number(x)>=41&&Number(x)<=53)||
            ['orta_r3','orta_r4','orta_sf'].some(x=>!!cur.bayDraws?.[x]))return;
@@ -183,13 +192,13 @@
         cur.winners[35]=school;
         cur.winnerSources[35]={source:'yonetici_2_tur_eslestirme',updatedAt:Date.now(),reason};
         cur.bayDraws.orta_r2=byeTeam;
-        cur.roundPairings.orta_r2={school,opponent,opponentMatchNo:opponentNo,byeTeam,reason,updatedAt:Date.now()};
+        cur.roundPairings.orta_r2={school,opponent,opponentMatchNo:opponentNo,byeTeam,byeMatchNo:byeNo,reason,updatedAt:Date.now()};
         cur.updatedAt=Date.now();cur.sonIslem='yonetici_2_tur_eslestirme';
         return cur;
       },undefined,false);
       if(!result.committed)throw new Error('Fikstür başka cihazda değişti veya üst tur sonucu oluştu. Mevcut kayıtlar korunarak işlem durduruldu.');
       try{await auditRef.update({status:'uygulandi',updatedAt:firebase.database.ServerValue.TIMESTAMP});}catch(e){console.warn('İşlem günlüğü güncellenemedi:',e);}
-      alert(school+', 2. turda '+opponent+' ile eşleştirildi. '+byeTeam+' ise diğer BAY hakkını aldı.');
+      alert(school+', 2. turda '+opponent+' ile eşleştirildi. '+byeTeam+' ise yönetici tarafından BAY atandı.');
       await renderFiksturIstisnaYonetimi();
     }
 
@@ -201,8 +210,10 @@
       if(op==='pair'){
         if(!m||no!==35)return alert('Bu işlem yalnızca rakipsiz #35 için kullanılabilir.');
         const opponentNo=document.getElementById('fIstR2Rakip')?.value;
+        const byeNo=document.getElementById('fIstR2Bay')?.value;
         const reason=puanMetniNormalize(document.getElementById('fIstGerekce')?.value);
-        try{await fiksturRakipsizOkuluUstTurdaEslestir(m,opponentNo,reason);}
+        if(!opponentNo||!byeNo)return alert('2. tur rakibini ve BAY alacak okulu ayrı ayrı seçin.');
+        try{await fiksturRakipsizOkuluUstTurdaEslestir(m,opponentNo,byeNo,reason);}
         catch(err){alert('2. tur eşleşmesi yapılamadı: '+(err?.message||err));}
         return;
       }
@@ -345,12 +356,70 @@
             const sonuclar=Object.values(state?.fiksturSonuclari || {}).sort((a,b)=>Number(a.macNo)-Number(b.macNo));
             kutu.innerHTML=sonuclar.length ? sonuclar.map(x=>`<div style="padding:7px 0;border-bottom:1px solid #334155;"><b>#${Number(x.macNo)} · ${htmlEscape(x.okul1)} / ${htmlEscape(x.okul2)}</b> — ${Number(x.puan1)} : ${Number(x.puan2)} · <span style="color:#34d399">${htmlEscape(x.galip)}</span> (${x.yontem==='sure'?'kısa süre':x.yontem==='son_savunma'?'son savunma':'puan'})</div>`).join('') : 'Henüz kesinleşmiş resmî fikstür sonucu yok.';
         }
-        const rev=document.getElementById('turnuvaRevision'),act=document.getElementById('aktif-tur-container'),old=document.getElementById('gecmis-turlar'),champ=document.getElementById('sampiyonAlani'),next=document.getElementById('nextTurBtn');if(!act||!old||!champ||!next)return;if(!state?.rounds){act.innerHTML='<div class="kriter-card" style="text-align:center;color:var(--text-muted);">Ayrı Canlı Puan Ağacı kurulmamış. Resmî fikstürden kesinleşen sonuçlar yukarıda gösteriliyor.</div>';old.innerHTML='';champ.innerHTML='';next.style.display='none';if(rev)rev.textContent='';return;}if(rev)rev.textContent=`Revizyon: ${state.revision||0} · Son güncelleme: ${state.updatedAt?new Date(state.updatedAt).toLocaleString('tr-TR'):'-'}`;const cr=Number(state.currentRound||1);const r=state.rounds?.['r'+cr];act.innerHTML=`<h3 style="color:var(--text-main);font-size:20px;border-left:4px solid var(--accent);padding-left:8px;">Aktif Tur: ${cr}. Eleme Eşleşmeleri</h3>`;const winners=[];Object.entries(r?.matches||{}).forEach(([mk,m])=>{if(m.winner)winners.push(m.winner);if(m.team2==='BYE'){act.innerHTML += `<div class="match-box" style="border-color:var(--success);"><b style="color:var(--success);">${htmlEscape(m.team1)}</b><br><span style="color:var(--text-muted);font-size:12px;">vs</span><br><b>BYE</b><div class="win-tag">Otomatik Tur Atladı</div></div>`;return;}const status=m.winner?`<div class="win-tag">Kazanan: ${htmlEscape(m.winner)}</div>`:(m.provisionalWinner?`<div class="win-tag" style="background:#78350f;color:#fde68a;border-color:#92400e;">Geçici üstün: ${htmlEscape(m.provisionalWinner)} · Maçı kapatınca kesinleşir</div>`:'');act.innerHTML += `<div class="match-box"><div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">${htmlEscape(m.macId)}</div><div class="match-team" style="border-bottom:1px solid #1f2937;padding-bottom:6px;"><span><b>${htmlEscape(m.team1)}</b></span><input type="number" class="skor-input" id="ts-${cr}-${mk}-1" value="${m.score1??''}" onchange="turnuvaManuelSkorKaydet('${'r'+cr}','${mk}')"></div><div style="text-align:center;margin:4px 0;font-size:11px;color:var(--text-muted);font-weight:bold;letter-spacing:1px;">VS</div><div class="match-team" style="border-top:1px solid #1f2937;padding-top:6px;"><span><b>${htmlEscape(m.team2)}</b></span><input type="number" class="skor-input" id="ts-${cr}-${mk}-2" value="${m.score2??''}" onchange="turnuvaManuelSkorKaydet('${'r'+cr}','${mk}')"></div>${status}</div>`;});
+        const rev=document.getElementById('turnuvaRevision'),act=document.getElementById('aktif-tur-container'),old=document.getElementById('gecmis-turlar'),champ=document.getElementById('sampiyonAlani'),next=document.getElementById('nextTurBtn');if(!act||!old||!champ||!next)return;if(!state?.rounds){act.innerHTML='<div class="kriter-card" style="text-align:center;color:var(--text-muted);">Ayrı Canlı Puan Ağacı kurulmamış. Resmî fikstürden kesinleşen sonuçlar yukarıda gösteriliyor.</div>';old.innerHTML='';champ.innerHTML='';next.style.display='none';if(rev)rev.textContent='';return;}if(rev)rev.textContent=`Revizyon: ${state.revision||0} · Son güncelleme: ${state.updatedAt?new Date(state.updatedAt).toLocaleString('tr-TR'):'-'}`;const cr=Number(state.currentRound||1);const r=state.rounds?.['r'+cr];act.innerHTML=`<h3 style="color:var(--text-main);font-size:20px;border-left:4px solid var(--accent);padding-left:8px;">Aktif Tur: ${cr}. Eleme Eşleşmeleri</h3>`;const winners=[];Object.entries(r?.matches||{}).forEach(([mk,m])=>{if(m.winner)winners.push(m.winner);if(m.team2==='BYE'){act.innerHTML += `<div class="match-box" style="border-color:var(--success);"><b style="color:var(--success);">${htmlEscape(m.team1)}</b><br><span style="color:var(--text-muted);font-size:12px;">vs</span><br><b>BYE</b><div class="win-tag">BAY · Tur atladı</div></div>`;return;}const status=m.winner?`<div class="win-tag">Kazanan: ${htmlEscape(m.winner)}</div>`:(m.provisionalWinner?`<div class="win-tag" style="background:#78350f;color:#fde68a;border-color:#92400e;">Geçici üstün: ${htmlEscape(m.provisionalWinner)} · Maçı kapatınca kesinleşir</div>`:'');act.innerHTML += `<div class="match-box"><div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">${htmlEscape(m.macId)}</div><div class="match-team" style="border-bottom:1px solid #1f2937;padding-bottom:6px;"><span><b>${htmlEscape(m.team1)}</b></span><input type="number" class="skor-input" id="ts-${cr}-${mk}-1" value="${m.score1??''}" onchange="turnuvaManuelSkorKaydet('${'r'+cr}','${mk}')"></div><div style="text-align:center;margin:4px 0;font-size:11px;color:var(--text-muted);font-weight:bold;letter-spacing:1px;">VS</div><div class="match-team" style="border-top:1px solid #1f2937;padding-top:6px;"><span><b>${htmlEscape(m.team2)}</b></span><input type="number" class="skor-input" id="ts-${cr}-${mk}-2" value="${m.score2??''}" onchange="turnuvaManuelSkorKaydet('${'r'+cr}','${mk}')"></div>${status}</div>`;});
         const matchCount=Object.keys(r?.matches||{}).length;const tamam=matchCount>0&&Object.values(r.matches).every(m=>!!m.winner);if(state.champion){champ.innerHTML=`<div class="champ-card">🏆 ${htmlEscape(secimler.kategori)} ŞAMPİYONU: ${htmlEscape(state.champion)} 🏆</div>`;next.style.display='none';}else{champ.innerHTML='';next.style.display=tamam?'block':'none';}
         old.innerHTML='';for(let n=cr-1;n>=1;n--){const rr=state.rounds?.['r'+n];if(!rr)continue;let h=`<div class="old-tur"><h4 style="color:var(--text-muted);margin-bottom:10px;">${n}. Tur Sonuç Arşivi</h4>`;Object.values(rr.matches||{}).forEach(m=>{h += `<div class="match-box" style="opacity:.75;"><div>${htmlEscape(m.team1)} <span style="color:var(--accent);">(${m.score1??'-'})</span></div><div>${htmlEscape(m.team2)} <span style="color:var(--accent);">(${m.score2??'-'})</span></div><div style="font-size:11px;color:var(--success);margin-top:5px;font-weight:bold;">→ ${htmlEscape(m.winner||'Sonuç yok')}</div></div>`;});old.innerHTML += h+'</div>';}
     }
 
-    async function ilkTuruKur(){const ta=document.getElementById('takimlar');let t=(ta?.value||'').split('\n').map(x=>x.trim()).filter(Boolean);if(t.length<2)return alert('Turnuvayı başlatmak için en az 2 okul bulunmalıdır!');const current=await turnuvaRef().once('value');if(current.exists()&&!confirm('Mevcut merkezi turnuva ağacı var. Yeni turnuva kurarsanız mevcut ağaç arşivlenip yenisi oluşturulacak. Devam edilsin mi?'))return;if(current.exists())await db.ref(`arsiv/turnuva/${secimler.kategori}/${Date.now()}`).set(current.val());t=t.map(x=>({x,r:Math.random()})).sort((a,b)=>a.r-b.r).map(o=>o.x);const round=roundOlustur(secimler.kategori,1,t);const state={version:3,revision:(current.val()?.revision||0)+1,status:'active',currentRound:1,rounds:{r1:round},champion:'',teams:t,fiksturSonuclari:current.val()?.fiksturSonuclari||{},createdAt:Date.now(),updatedAt:Date.now()};await turnuvaRef().set(state);await roundMaclariniKaydet(secimler.kategori,round);firebaseArsivYedegiAl(true,'turnuva_baslangic');}
+    function turnuvaBaySeciminiOnayla(){
+        const select=document.getElementById('turnuvaBaySecimSelect');
+        const chosen=select?.value||'';
+        if(!chosen)return alert('BAY alacak okulu seçin.');
+        const resolve=turnuvaBaySecimResolver;
+        turnuvaBaySecimResolver=null;
+        puanGuvenceModaliniKapat();
+        if(resolve)resolve(chosen);
+    }
+    function turnuvaBaySeciminiIptalEt(){
+        const resolve=turnuvaBaySecimResolver;
+        turnuvaBaySecimResolver=null;
+        puanGuvenceModaliniKapat();
+        if(resolve)resolve(null);
+    }
+    function turnuvaBaySecimiIste(kategori,turNo,takimlar,oncekiBaylar=[]){
+        if(!Array.isArray(takimlar)||takimlar.length%2===0)return Promise.resolve('');
+        const keyOf=x=>skorEslesmeAnahtari(x);
+        const used=new Set((oncekiBaylar||[]).filter(Boolean).map(keyOf));
+        const candidates=takimlar.filter(x=>x&&!used.has(keyOf(x)));
+        if(!candidates.length){
+            alert('Bu turda daha önce BAY almamış uygun okul bulunamadı. Otomatik BAY atanmadı; tur oluşturulmadı.');
+            return Promise.resolve(null);
+        }
+        const options=candidates.map(x=>'<option value="'+htmlEscape(x)+'">'+htmlEscape(x)+'</option>').join('');
+        const body='<div class="puan-guvence-note"><b>'+turNo+'. turda takım sayısı tek.</b> BAY alacak okulu yönetici olarak sen seçmelisin. Önceki turlarda BAY alan okullar bu listede yer almaz; böylece sonraki turda rakipleri olur.</div>'+
+            '<label class="puanlama-etiket" for="turnuvaBaySecimSelect">BAY verilecek okul</label>'+
+            '<select id="turnuvaBaySecimSelect">'+options+'</select>'+
+            '<div class="bildirim-footer-actions"><button type="button" onclick="turnuvaBaySeciminiOnayla()">Seçimi onayla</button><button type="button" onclick="turnuvaBaySeciminiIptalEt()">Vazgeç</button></div>'+
+            '<p class="bildirim-disclaimer">Seçim yapılmadan veya onay verilmeden turnuva ağacına hiçbir değişiklik yazılmaz.</p>';
+        return new Promise(resolve=>{
+            puanGuvenceModaliniAc('Tur '+turNo+' · Manuel BAY ataması',body);
+            turnuvaBaySecimResolver=resolve;
+        });
+    }
+
+    async function ilkTuruKur(){
+        const ta=document.getElementById('takimlar');
+        let teams=(ta?.value||'').split('\n').map(x=>x.trim()).filter(Boolean);
+        if(teams.length<2)return alert('Turnuvayı başlatmak için en az 2 okul bulunmalıdır!');
+        const currentSnap=await turnuvaRef().once('value');
+        const current=currentSnap.val();
+        if(current&&!confirm('Mevcut merkezi turnuva ağacı var. Yeni turnuva kurarsanız mevcut ağaç arşivlenip yenisi oluşturulacak. Devam edilsin mi?'))return;
+        teams=teams.map(x=>({x,r:Math.random()})).sort((a,b)=>a.r-b.r).map(o=>o.x);
+        let byeTeam='';
+        if(teams.length%2===1){
+            byeTeam=await turnuvaBaySecimiIste(secimler.kategori,1,teams,[]);
+            if(!byeTeam)return;
+        }
+        // Arşivleme/yazma, yalnızca tüm eşleştirme ve manuel BAY seçimi tamamlandıktan sonra yapılır.
+        if(current)await db.ref('arsiv/turnuva/'+secimler.kategori+'/'+Date.now()).set(current);
+        const round=roundOlustur(secimler.kategori,1,teams,byeTeam);
+        const state={version:3,revision:(current?.revision||0)+1,status:'active',currentRound:1,
+            rounds:{r1:round},champion:'',teams,fiksturSonuclari:current?.fiksturSonuclari||{},
+            createdAt:Date.now(),updatedAt:Date.now()};
+        await turnuvaRef().set(state);
+        await roundMaclariniKaydet(secimler.kategori,round);
+        firebaseArsivYedegiAl(true,'turnuva_baslangic');
+    }
 
     async function turnuvaManuelSkorKaydet(roundKey,matchKey){const stateSnap=await turnuvaRef().once('value');const cur=stateSnap.val();const turNo=Number(roundKey.replace('r',''));const s1=parseFloat(document.getElementById(`ts-${turNo}-${matchKey}-1`)?.value),s2=parseFloat(document.getElementById(`ts-${turNo}-${matchKey}-2`)?.value);await turnuvaRef().transaction(state=>{if(!state?.rounds?.[roundKey]?.matches?.[matchKey])return state;const m=state.rounds[roundKey].matches[matchKey];m.score1=Number.isFinite(s1)?s1:null;m.score2=Number.isFinite(s2)?s2:null;m.provisionalWinner='';m.winner='';if(Number.isFinite(s1)&&Number.isFinite(s2)){if(s1>s2)m.winner=m.team1;else if(s2>s1)m.winner=m.team2;}m.updatedAt=Date.now();state.revision=(state.revision||0)+1;state.updatedAt=Date.now();return state;});}
 
@@ -387,7 +456,63 @@
         },undefined,false);
     }
 
-    async function yeniTur(){let olusanRound=null;await turnuvaRef().transaction(state=>{if(!state?.rounds)return state;const cr=Number(state.currentRound||1),r=state.rounds['r'+cr];if(!r)return state;const matches=Object.values(r.matches||{});if(!matches.length||!matches.every(m=>!!m.winner))return state;const winners=matches.map(m=>m.winner);if(winners.length===1){state.champion=winners[0];state.status='completed';state.revision=(state.revision||0)+1;state.updatedAt=Date.now();return state;}const nextNo=cr+1;if(state.rounds['r'+nextNo])return state;olusanRound=roundOlustur(secimler.kategori,nextNo,winners);state.rounds['r'+nextNo]=olusanRound;state.currentRound=nextNo;state.revision=(state.revision||0)+1;state.updatedAt=Date.now();return state;});if(olusanRound)await roundMaclariniKaydet(secimler.kategori,olusanRound);await firebaseArsivYedegiAl(true,'tur_gecisi');}
+    async function yeniTur(){
+        const snapshot=await turnuvaRef().once('value');
+        const original=snapshot.val();
+        if(!original?.rounds)return alert('Henüz kurulmuş bir turnuva ağacı yok.');
+        const currentRound=Number(original.currentRound||1);
+        const current=original.rounds['r'+currentRound];
+        const currentMatches=Object.values(current?.matches||{});
+        if(!currentMatches.length||!currentMatches.every(m=>!!m.winner))
+            return alert('Mevcut turdaki bütün karşılaşmaların galibi kesinleşmeden yeni tur kurulamaz.');
+        const winners=currentMatches.map(m=>m.winner).filter(Boolean);
+        if(!winners.length)return alert('Üst tura aktarılacak galip bulunamadı.');
+        const nextNo=currentRound+1;
+        if(original.rounds['r'+nextNo])return alert('Bir sonraki tur zaten kurulmuş. Mevcut eşleşmeler korunuyor.');
+        if(winners.length===1){
+            const finished=await turnuvaRef().transaction(state=>{
+                if(!state||state.updatedAt!==original.updatedAt||Number(state.currentRound||1)!==currentRound)return;
+                const live=Object.values(state.rounds?.['r'+currentRound]?.matches||{});
+                if(!live.length||!live.every(m=>!!m.winner))return;
+                const champion=live[0]?.winner;
+                if(!champion)return;
+                state.champion=champion;state.status='completed';
+                state.revision=(state.revision||0)+1;state.updatedAt=Date.now();return state;
+            },undefined,false);
+            if(!finished.committed)return alert('Turnuva başka cihazdan değişti. Sayfayı yenileyip yeniden kontrol edin.');
+            await firebaseArsivYedegiAl(true,'tur_gecisi');
+            return;
+        }
+        const previousBays=[];
+        for(const round of Object.values(original.rounds||{})){
+            for(const match of Object.values(round?.matches||{})){
+                if(match?.team2==='BYE'&&match.team1)previousBays.push(match.team1);
+            }
+        }
+        let byeTeam='';
+        if(winners.length%2===1){
+            byeTeam=await turnuvaBaySecimiIste(secimler.kategori,nextNo,winners,previousBays);
+            if(!byeTeam)return;
+        }
+        let olusanRound=null;
+        const result=await turnuvaRef().transaction(state=>{
+            if(!state||state.updatedAt!==original.updatedAt||Number(state.currentRound||1)!==currentRound)return;
+            if(state.rounds?.['r'+nextNo])return;
+            const live=Object.values(state.rounds?.['r'+currentRound]?.matches||{});
+            if(!live.length||!live.every(m=>!!m.winner))return;
+            const liveWinners=live.map(m=>m.winner).filter(Boolean);
+            if(liveWinners.length!==winners.length||
+                liveWinners.some((name,i)=>skorEslesmeAnahtari(name)!==skorEslesmeAnahtari(winners[i])))return;
+            if(byeTeam&&!liveWinners.some(x=>skorEslesmeAnahtari(x)===skorEslesmeAnahtari(byeTeam)))return;
+            olusanRound=roundOlustur(secimler.kategori,nextNo,liveWinners,byeTeam);
+            state.rounds['r'+nextNo]=olusanRound;
+            state.currentRound=nextNo;state.revision=(state.revision||0)+1;state.updatedAt=Date.now();
+            return state;
+        },undefined,false);
+        if(!result.committed)return alert('Turnuva siz seçim yaparken başka cihazdan değişti. Yeni tur oluşturulmadı; eşleşmeleri yeniden kontrol edin.');
+        if(olusanRound)await roundMaclariniKaydet(secimler.kategori,olusanRound);
+        await firebaseArsivYedegiAl(true,'tur_gecisi');
+    }
 
     async function turnuvayiSifirla(){const cevap=prompt(`${secimler.kategori} turnuvasını merkezi veritabanından sıfırlamak için SIFIRLA yazınız:`);if(cevap!=='SIFIRLA')return;const snap=await turnuvaRef().once('value');if(snap.exists())await db.ref(`arsiv/turnuva/${secimler.kategori}/${Date.now()}`).set(snap.val());await turnuvaRef().remove();localStorage.removeItem(TURN_CACHE_PREFIX+secimler.kategori);alert('Turnuva ağacı arşivlendi ve sıfırlandı. Puan kayıtları silinmedi.');}
 
@@ -494,11 +619,27 @@
     function ustGezinmeyiGuncelle(){
         const app=document.getElementById('app');if(!app)return;
         let nav=document.getElementById('ustGezinme');
-        if(!nav){nav=document.createElement('nav');nav.id='ustGezinme';nav.className='global-nav no-print';
+        if(!nav){
+            nav=document.createElement('nav');nav.id='ustGezinme';nav.className='global-nav no-print';
             nav.setAttribute('aria-label','Ekran gezinme');
-            nav.innerHTML='<button onclick="ekranGeriDon()" title="Geri dön (Backspace)">← Geri</button><button onclick="anaMenu()" title="Ana menüye git">⌂ Ana Menü</button>';
+            nav.innerHTML='<button type="button" onclick="ekranGeriDon()" title="Geri dön (Backspace)">← Geri</button><button type="button" onclick="anaMenu()" title="Ana menüye git">⌂ Ana Menü</button>';
             document.body.appendChild(nav);
         }
+        let bell=nav.querySelector('#adminGlobalNotificationButton');
+        if(typeof adminYetkiliMi==='function'&&adminYetkiliMi()){
+            if(!bell){
+                bell=document.createElement('button');bell.id='adminGlobalNotificationButton';
+                bell.type='button';bell.className='admin-global-notification';
+                bell.onclick=()=>bildirimMerkeziniAc();
+                bell.title='Puan gönderim bildirimleri ve bekleyen kayıtlar';
+                nav.appendChild(bell);
+            }
+            const pending=typeof offlineKuyrukGetir==='function'
+                ?Object.values(offlineKuyrukGetir()).filter(x=>x&&x.kayit).length:0;
+            const unread=typeof puanBildirimOkunmamisSayisi==='function'?puanBildirimOkunmamisSayisi():0;
+            const badge=pending||unread;
+            bell.innerHTML='🔔 Bildirimler'+(badge?'<span class="admin-notification-count">'+badge+'</span>':'');
+        }else if(bell)bell.remove();
         const anasayfa=!!app.querySelector('main.home-shell:not(.admin-menu-shell) .home-head');
         nav.style.display=anasayfa?'none':'flex';
     }

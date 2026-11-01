@@ -317,8 +317,8 @@
                 <div style="font-size:13px;color:#cbd5e1;">Maç seçildiğinde yalnızca o günün ve kategorinin <b>3 asıl jüri adı</b> listelenir. Yedek jüri bu seçim listesinde gösterilmez.</div>
             </div>`;
         document.getElementById('app').innerHTML = `
-            <div class="card" style="max-width:930px;">
-                <h2>Jüri Puanlama</h2>
+            <div class="card juri-selection-card" style="max-width:1080px;">
+                <header class="juri-selection-header"><div><span class="juri-page-eyebrow">JÜRİ ÇALIŞMA ALANI</span><h2>Jüri Puanlama</h2><p>Önce karşılaşmayı seçin, ardından taraf ve öğrenciyi belirleyin.</p></div><span class="juri-header-mark">13 kriter · otomatik taslak</span></header>
                 <div class="btn-grid" style="grid-template-columns:1fr 1fr;gap:8px;">
                     <button class="btn" style="background:#1d4ed8; margin:0;" onclick="renderSureAnaEkran()">⏱ Konuşma Süreleri (Şifresiz)</button>
                     <button class="btn" style="margin:0;" onclick="anaMenu()">← Ana Ekran</button>
@@ -326,35 +326,49 @@
                 <div class="puan-guvence-juri-actions"><button type="button" onclick="juriPuanGecmisiniAc()">📚 Gönderdiğim puanlar</button><button type="button" onclick="puanKuyrukDetayiniAc()">📤 Bekleyen puanlar</button></div>
                 ${juriHtml}
                 <div id="puanFirebaseDurumu" class="puanlama-bilgi hata" role="alert" style="display:none;"></div>
-                <div class="btn-grid" style="grid-template-columns: 1fr 1fr; margin-bottom:16px;">
-                    <button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this, 'ORTAOKUL', 'puanlama')">ORTAOKUL</button>
-                    <button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this, 'LİSE', 'puanlama')">LİSE</button>
-                </div>
+                <section class="juri-step-block juri-step-category">
+                    <div class="juri-step-heading"><span>01</span><div><b>Kategori</b><small>Öğrenci düzeyini seçin</small></div></div>
+                    <div class="btn-grid juri-category-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0;">
+                        <button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this, 'ORTAOKUL', 'puanlama')">ORTAOKUL</button>
+                        <button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this, 'LİSE', 'puanlama')">LİSE</button>
+                    </div>
+                </section>
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                     <div id="puanlamaVeriDurumu" class="puanlama-bilgi" style="flex:1;">Sabit fikstür ve öğrenci kayıtları yükleniyor…</div>
                     <button class="btn" style="width:auto;padding:10px 12px;margin:0;" onclick="puanlamaVerileriniYenile()">↻ Yenile</button>
                 </div>
-                <label for="aktifMac" class="puanlama-etiket">Maç seç</label>
-                <select id="aktifMac" onchange="merkeziMacSecildi()"><option value="">Fikstür maçları yükleniyor…</option></select>
-                <div style="font-size:11px;line-height:1.45;color:#93c5fd;margin:2px 0 7px;">Maç, cihazın tarih ve saatine göre otomatik seçilir: önce şu anki seans, ardından bugünün sıradaki açık maçı. Gerekirse bu listeden başka maç seçebilirsiniz.</div>
-                <div id="seciliMacBilgisi" style="color:#94a3b8;font-size:12px;margin:5px 0 12px;">Maç seçildiğinde hükümet ve muhalefet okulları otomatik belirlenecek.</div>
+                <section class="juri-step-block">
+                    <div class="juri-step-heading"><span>02</span><div><b>Karşılaşma</b><small>Bugünkü aktif maç otomatik önerilir; gerekirse değiştirin</small></div></div>
+                    <label for="aktifMac" class="puanlama-etiket">Maç</label>
+                    <select id="aktifMac" class="juri-large-select" onchange="merkeziMacSecildi()"><option value="">Fikstür maçları yükleniyor…</option></select>
+                    <div id="seciliMacBilgisi" class="juri-match-summary">Maç seçildiğinde hükümet ve muhalefet okulları otomatik belirlenecek.</div>
+                </section>
                 <details class="puanlama-manuel"><summary>Gerektiğinde okulları manuel seç</summary>
                     <select id="hukOkul" onchange="macOkulDegisti('hukOkul')"><option value="">Hükümet Okul Seçiniz</option></select>
                     <select id="muhOkul" onchange="macOkulDegisti('muhOkul')"><option value="">Muhalefet Okul Seçiniz</option></select>
                 </details>
                 <div id="puanlamaKaynakPanel"></div>
-                <div class="btn-grid" style="grid-template-columns: 1fr 1fr; margin-top:16px;">
-                    <button class="btn taraf-btn ${secimler.taraf==='HÜKÜMET'?'btn-active':''}" style="border-left:4px solid var(--hukumet);" onclick="tekSecim(this,'taraf','taraf-btn')">HÜKÜMET</button>
-                    <button class="btn taraf-btn ${secimler.taraf==='MUHALEFET'?'btn-active':''}" style="border-left:4px solid var(--muhalefet);" onclick="tekSecim(this,'taraf','taraf-btn')">MUHALEFET</button>
-                </div>
-                <div class="btn-grid" style="grid-template-columns:1fr 1fr;" id="ogrenciButonAlani">
-                    <div style="grid-column:span 2;text-align:center;padding:16px;color:var(--text-muted);">Önce maç ve taraf seçiniz.</div>
-                </div>
-                <div id="canliJuriDurumu" class="kriter-card" style="margin-top:15px;">Maç ve öğrenci seçildiğinde jüri durumu burada görünecek.</div>
-                <button class="btn" style="background:var(--primary);border:none;margin-top:25px;font-size:16px;padding:16px;" onclick="puanlamaSayfasinaGec()" ${oturum?'':'disabled'}>Kriterleri Puanla →</button>
-                <button class="btn" style="background:#92400e;border-color:#b45309;" onclick="juriSurePenceresiniSifirla('juri_secim_ekrani')">↻ Puanlama açılmıyor mu? Ortak süreyi sıfırla</button>
-                <div style="font-size:11px;color:#cbd5e1;line-height:1.45;margin-top:-3px;">Bu isteğe bağlı işlem aynı öğrenci için bütün jüri cihazlarındaki ortak 6 dakikalık sayacı yeniden başlatır; puan kayıtlarını silmez. Kullanım ve iptal bilgisi yönetici günlüğüne yazılır.</div>
-                <button class="btn" style="background:#475569;" onclick="anaMenu()">← Ana Menü</button>
+                <section class="juri-step-block">
+                    <div class="juri-step-heading"><span>03</span><div><b>Değerlendireceğiniz taraf</b><small>Hükümet veya muhalefet okulunu seçin</small></div></div>
+                    <div class="btn-grid juri-side-grid" style="grid-template-columns:1fr 1fr;margin:0;">
+                        <button class="btn taraf-btn ${secimler.taraf==='HÜKÜMET'?'btn-active':''}" style="border-left:4px solid var(--hukumet);" onclick="tekSecim(this,'taraf','taraf-btn')" data-value="HÜKÜMET"><span>HÜKÜMET</span><small id="juriHukOkulEtiketi">Hükümet okulu</small></button>
+                        <button class="btn taraf-btn ${secimler.taraf==='MUHALEFET'?'btn-active':''}" style="border-left:4px solid var(--muhalefet);" onclick="tekSecim(this,'taraf','taraf-btn')" data-value="MUHALEFET"><span>MUHALEFET</span><small id="juriMuhOkulEtiketi">Muhalefet okulu</small></button>
+                    </div>
+                </section>
+                <section class="juri-step-block juri-student-step">
+                    <div class="juri-step-heading"><span>04</span><div><b>Öğrenci</b><small>Listeden puanlayacağınız konuşmacıyı seçin</small></div></div>
+                    <div class="btn-grid juri-student-grid" id="ogrenciButonAlani">
+                        <div class="juri-selection-empty">Önce maç ve taraf seçiniz.</div>
+                    </div>
+                </section>
+                <div id="canliJuriDurumu" class="kriter-card juri-live-status" style="margin-top:15px;">Maç ve öğrenci seçildiğinde jüri durumu burada görünecek.</div>
+                <button class="btn juri-start-scoring-button" onclick="puanlamaSayfasinaGec()" ${oturum?'':'disabled'}>Seçilen öğrenciyi puanla <span>→</span></button>
+                <details class="juri-advanced-settings">
+                    <summary>Sorun giderme ve gelişmiş işlemler</summary>
+                    <p>Ortak süreyi sıfırlamak aynı öğrenci için bütün jüri cihazlarındaki 6 dakikalık sayacı yeniden başlatır. Yalnızca gerçekten gerekli olduğunda kullanın.</p>
+                    <button class="btn" style="background:#92400e;border-color:#b45309;" onclick="juriSurePenceresiniSifirla('juri_secim_ekrani')">↻ Ortak süreyi sıfırla</button>
+                </details>
+                <button class="btn juri-back-button" onclick="anaMenu()">← Ana Menü</button>
             </div>`;
         puanFirebaseDurumuGoster();
         void juriPaneliniGuncelle();
@@ -376,6 +390,10 @@
         const m=puanlamaMaclar.get(secimler.macId);
         if(!m){container.innerHTML='';if(bilgi)bilgi.textContent='Maç seçildiğinde okullar otomatik belirlenecek.';return;}
         if(bilgi)bilgi.textContent=`${m.fiksturNo?'#'+m.fiksturNo+' · ':''}${m.fiksturTarih||''} ${m.fiksturSaat||''} · HÜKÜMET: ${m.hukOkul} / MUHALEFET: ${m.muhOkul}`;
+        const hukTag=document.getElementById('juriHukOkulEtiketi');
+        const muhTag=document.getElementById('juriMuhOkulEtiketi');
+        if(hukTag)hukTag.textContent=m.hukOkul||'Hükümet okulu';
+        if(muhTag)muhTag.textContent=m.muhOkul||'Muhalefet okulu';
         const huk=puanlamaKaynakAdi(m,'HÜKÜMET');
         const muh=puanlamaKaynakAdi(m,'MUHALEFET');
         if(!puanlamaOkulAdlari().length){
@@ -654,7 +672,7 @@
     function tekSecim(element, tip, sinif) {
         document.querySelectorAll('.' + sinif).forEach(b => b.classList.remove('btn-active'));
         element.classList.add('btn-active');
-        secimler[tip] = element.innerText;
+        secimler[tip] = element.dataset?.value || element.innerText;
         if(tip === 'taraf') {
             secimler.ogr = '';
             ogrencileriYukle();
@@ -1069,7 +1087,14 @@ Devam edilsin mi?`)){
             btn.style.pointerEvents='auto';btn.style.opacity='1';btn.setAttribute('aria-disabled','false');
         });
         const gonder=document.getElementById('btnPuanGonder');
-        if(gonder){gonder.disabled=!!puanGonderiliyor;gonder.innerText=puanGonderiliyor?'Gönderiliyor...':'Puanları Gönder ✓';}
+        if(gonder){
+            const tamam=krit.length===13&&krit.every((k,i)=>{
+                const p=verilenPuanlar?.[i];return Number.isInteger(p)&&p>=1&&p<=Number(k.m);
+            });
+            const eksik=krit.length-krit.reduce((n,k,i)=>n+(Number.isInteger(verilenPuanlar?.[i])&&verilenPuanlar[i]>=1&&verilenPuanlar[i]<=Number(k.m)?1:0),0);
+            gonder.disabled=!!puanGonderiliyor||!tamam;
+            gonder.innerText=puanGonderiliyor?'Gönderiliyor...':tamam?'Puanları Gönder ✓':eksik+' kriter daha gerekli';
+        }
         const not=document.getElementById('puanGirisSureNotu'),veri=aktifOrtakSureVerisi;
         if(not){
             if(!veri||!Number(veri.baslangicAt))not.textContent='Süre doğrulaması bekleniyor; puan girişi açık ve taslaklar otomatik saklanır.';
@@ -1188,17 +1213,29 @@ Devam edilsin mi?`)){
         verilenPuanlar={};
         // Süre/maç durumu puanlama ekranını engellemez; gönderim aşamasında ayrıca denetlenir.
         verilenPuanlar = {};
-        const html = `<div class="card"><h2>Puanlama Tablosu: ${htmlEscape(secimler.ogr)}</h2>
-                    <div style="font-size:14px; color:var(--text-muted); margin-bottom:20px;">Kategori: <b>${htmlEscape(secimler.kategori)}</b> | Maç: <b>${htmlEscape(mac.etiket)}</b> | Okul: <b>${htmlEscape(secimler.okul)}</b> | Değerlendiren: <b>${htmlEscape(oturum.juri)} · ${htmlEscape(oturum.ad)}</b></div>
+        const html = `<div class="card juri-scoring-card">
+                    <header class="juri-scoring-header">
+                        <div><span class="juri-page-eyebrow">JÜRİ DEĞERLENDİRMESİ</span><h2>${htmlEscape(secimler.ogr)}</h2>
+                        <p>${htmlEscape(secimler.kategori)} · ${htmlEscape(mac.etiket)} · ${htmlEscape(secimler.okul)}</p></div>
+                        <span class="juri-scoring-role">${htmlEscape(oturum.juri)} · ${htmlEscape(oturum.ad)}</span>
+                    </header>
                     <div id="ortakKonusmaSayaci" class="puanlama-bilgi">⏱ Ortak süre başlatılıyor…</div>
-                    <div style="font-size:12px;line-height:1.5;color:#cbd5e1;margin:-3px 0 10px;">Ortak süre 6 dakikadır. Süre bittikten sonra jüriye 1 dakika ek gönderim süresi tanınır. Bu süre geçse bile puan girişi açık kalır; geç gönderimler resmî sonuca eklenmeden arşivlenir.</div>
                     <div id="puanGirisSureNotu" class="puanlama-bilgi">Süre doğrulaması bekleniyor; puan girişi açıktır.</div>
                     <div id="juriSureBilgisi" class="puanlama-bilgi">Resmî öğrenci süresi kontrol ediliyor…</div>
-                    <div id="kriterListesi"></div>
-                    <div id="puanTaslakDurumu" class="puanlama-bilgi" style="font-size:12px;">Puan seçimleri otomatik olarak cihazda, bağlantı varsa Firebase’de taslak kaydedilir. Bu taslak, resmî puan kaydı değildir.</div>
+                    <section class="puan-progress-card" aria-live="polite">
+                        <div class="puan-progress-top"><div><span>PUANLAMA İLERLEMESİ</span><strong id="puanIlerlemeAdet">0 / 13 kriter</strong></div><div class="puan-progress-total"><small>TOPLAM PUAN</small><b id="puanIlerlemeToplam">0 / 100</b></div></div>
+                        <div class="puan-progress-track"><div id="puanIlerlemeBar" style="width:0%"></div></div>
+                        <div class="puan-progress-foot"><span id="puanIlerlemeMesaj">Her kriterden bir puan seçin.</span><span id="puanIlerlemeKalan">13 kriter kaldı</span></div>
+                    </section>
+                    <div id="kriterListesi" class="juri-criteria-grid"></div>
+                    <div id="puanTaslakDurumu" class="puanlama-bilgi juri-draft-status">Puan seçimleriniz otomatik taslak olarak cihazda saklanır. Bu kayıt resmî puan değildir.</div>
                     <div id="puanFirebaseDurumu" class="puanlama-bilgi hata" role="alert" style="display:none;"></div>
-                    <button id="btnPuanGonder" class="btn" style="background:var(--success); border:none; margin-top:25px; padding:16px; font-size:16px;" onclick="puanlariGonder()">Puanları Gönder ✓</button>
-                    <button class="btn" style="background:#475569" onclick="renderPuanlamaSecim()">← Geri Dön</button></div>`;
+                    <div class="puanlama-action-bar">
+                        <div class="puan-action-summary"><strong id="puanIlerlemeMini">0 / 13</strong><span>Kriter tamamlandı</span></div>
+                        <button id="btnPuanGonder" class="btn" disabled onclick="puanlariGonder()">13 kriter tamamlanınca gönderilebilir</button>
+                        <button type="button" class="puan-action-back" onclick="renderPuanlamaSecim()">← Seçime dön</button>
+                    </div>
+                </div>`;
         document.getElementById('app').innerHTML = html;
         puanFirebaseDurumuGoster();
         ortakPuanArayuzunuGuncelle();
@@ -1217,20 +1254,52 @@ Devam edilsin mi?`)){
         }).catch(err=>{const alan=document.getElementById('juriSureBilgisi');if(alan)alan.textContent='Konuşma süresi okunamadı: '+String(err?.message||err);});
         void ortakSureBaslat(secimler.kategori,mac,secimler.okul,secimler.ogr);
         krit.forEach((k, i) => {
-            const d = document.createElement('div'); d.className = 'kriter-card';
+            const d = document.createElement('section');d.className='kriter-card puan-kriter-kart';d.dataset.kriterIndex=String(i);
             let kutular = '';
-            for(let n=1; n<=k.m; n++) kutular += `<div class="puan-btn" onclick="puanSec(this, ${i}, ${n})">${n}</div>`;
-            d.innerHTML = `<span class="kriter-label">${i+1}. ${k.t} <span style="color:var(--text-muted); font-weight:normal;">(Maks: ${k.m})</span></span><div class="puan-row">${kutular}</div>`;
+            for(let n=1;n<=k.m;n++)kutular += `<button type="button" class="puan-btn" aria-pressed="false" onclick="puanSec(this, ${i}, ${n})">${n}</button>`;
+            d.innerHTML = `<div class="puan-kriter-head"><div class="puan-kriter-title"><span class="puan-kriter-no">${String(i+1).padStart(2,'0')}</span><span class="kriter-label">${htmlEscape(k.t)}</span></div><div class="puan-kriter-meta"><span class="puan-kriter-max">Maks. ${k.m}</span><b class="puan-kriter-value">Seçilmedi</b></div></div><div class="puan-row" role="group" aria-label="${htmlEscape(k.t)} puanı">${kutular}</div>`;
             list.appendChild(d);
         });
+        puanlamaIlerlemesiniGuncelle();
         void puanTaslaginiGeriYukle(aktifPuanTaslak);
+    }
+
+    function puanlamaIlerlemesiniGuncelle(){
+        const total=krit.length;
+        const selected=krit.reduce((n,k,i)=>n+(Number.isInteger(verilenPuanlar?.[i])&&verilenPuanlar[i]>=1&&verilenPuanlar[i]<=k.m?1:0),0);
+        const score=krit.reduce((n,k,i)=>n+(Number.isInteger(verilenPuanlar?.[i])?verilenPuanlar[i]:0),0);
+        const maximum=krit.reduce((n,k)=>n+Number(k.m||0),0);
+        const percent=total?Math.round(selected/total*100):0;
+        const values={
+            puanIlerlemeAdet:selected+' / '+total+' kriter',
+            puanIlerlemeToplam:score+' / '+maximum,
+            puanIlerlemeMini:selected+' / '+total,
+            puanIlerlemeKalan:(total-selected)+' kriter kaldı',
+            puanIlerlemeMesaj:selected===total?'✓ Değerlendirme tamamlandı. Gönderim için hazır.':(total-selected)+' kriter için puan seçilmesi gerekiyor.'
+        };
+        Object.entries(values).forEach(([id,value])=>{const el=document.getElementById(id);if(el)el.textContent=value;});
+        const bar=document.getElementById('puanIlerlemeBar');if(bar)bar.style.width=percent+'%';
+        const submit=document.getElementById('btnPuanGonder');
+        if(submit){
+            submit.disabled=selected!==total||puanGonderiliyor;
+            submit.textContent=selected===total?'Puanları güvenle gönder ✓':(total-selected)+' kriter daha gerekli';
+        }
+        document.querySelectorAll('#kriterListesi .puan-kriter-kart').forEach(card=>{
+            const i=Number(card.dataset.kriterIndex),v=verilenPuanlar?.[i],valid=Number.isInteger(v)&&v>=1&&v<=Number(krit[i]?.m);
+            card.classList.toggle('is-complete',valid);
+            const label=card.querySelector('.puan-kriter-value');if(label)label.textContent=valid?(v+' / '+krit[i].m+' puan'):'Seçilmedi';
+            card.querySelectorAll('.puan-btn').forEach(btn=>btn.setAttribute('aria-pressed',btn.classList.contains('selected')?'true':'false'));
+        });
     }
 
     function puanSec(element, kriterIndex, puan) {
         if(!element || !element.parentElement || !Number.isInteger(Number(puan)))return;
-        element.parentElement.querySelectorAll('.puan-btn').forEach(x => x.classList.remove('selected'));
-        element.classList.add('selected');
+        element.parentElement.querySelectorAll('.puan-btn').forEach(x => {
+            x.classList.remove('selected');x.setAttribute('aria-pressed','false');
+        });
+        element.classList.add('selected');element.setAttribute('aria-pressed','true');
         verilenPuanlar[kriterIndex] = Number(puan);
+        puanlamaIlerlemesiniGuncelle();
         puanTaslaginiKaydet();
     }
 
@@ -1497,8 +1566,9 @@ Devam edilsin mi?`)){
             }
         } finally {
             puanGonderiliyor = false;
+            puanlamaIlerlemesiniGuncelle();
             const yeniBtn = document.getElementById('btnPuanGonder');
-            if (yeniBtn) { yeniBtn.innerText = 'Puanları Gönder ✓'; ortakPuanArayuzunuGuncelle(); }
+            if (yeniBtn) { ortakPuanArayuzunuGuncelle(); }
         }
     }
 
