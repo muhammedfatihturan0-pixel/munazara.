@@ -1087,7 +1087,14 @@ Devam edilsin mi?`)){
             btn.style.pointerEvents='auto';btn.style.opacity='1';btn.setAttribute('aria-disabled','false');
         });
         const gonder=document.getElementById('btnPuanGonder');
-        if(gonder){gonder.disabled=!!puanGonderiliyor;gonder.innerText=puanGonderiliyor?'Gönderiliyor...':'Puanları Gönder ✓';}
+        if(gonder){
+            const tamam=krit.length===13&&krit.every((k,i)=>{
+                const p=verilenPuanlar?.[i];return Number.isInteger(p)&&p>=1&&p<=Number(k.m);
+            });
+            const eksik=krit.length-krit.reduce((n,k,i)=>n+(Number.isInteger(verilenPuanlar?.[i])&&verilenPuanlar[i]>=1&&verilenPuanlar[i]<=Number(k.m)?1:0),0);
+            gonder.disabled=!!puanGonderiliyor||!tamam;
+            gonder.innerText=puanGonderiliyor?'Gönderiliyor...':tamam?'Puanları Gönder ✓':eksik+' kriter daha gerekli';
+        }
         const not=document.getElementById('puanGirisSureNotu'),veri=aktifOrtakSureVerisi;
         if(not){
             if(!veri||!Number(veri.baslangicAt))not.textContent='Süre doğrulaması bekleniyor; puan girişi açık ve taslaklar otomatik saklanır.';
