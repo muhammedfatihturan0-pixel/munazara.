@@ -1253,6 +1253,7 @@ Devam edilsin mi?`)){
             d.innerHTML = `<div class="puan-kriter-head"><div class="puan-kriter-title"><span class="puan-kriter-no">${String(i+1).padStart(2,'0')}</span><span class="kriter-label">${htmlEscape(k.t)}</span></div><div class="puan-kriter-meta"><span class="puan-kriter-max">Maks. ${k.m}</span><b class="puan-kriter-value">Seçilmedi</b></div></div><div class="puan-row" role="group" aria-label="${htmlEscape(k.t)} puanı">${kutular}</div>`;
             list.appendChild(d);
         });
+        puanlamaIlerlemesiniGuncelle();
         void puanTaslaginiGeriYukle(aktifPuanTaslak);
     }
 
