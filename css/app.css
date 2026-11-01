@@ -320,3 +320,104 @@ body { padding-top: 78px; }
  .puan-guvence-criteria {grid-template-columns:1fr;}
  .puan-guvence-modal {max-height:92vh;}
 }
+
+/* 3.38 — Daha belirgin, tek noktadan erişilen Bildirim Merkezi */
+body { padding-top: 72px; }
+.puan-guvence-bar {
+    min-height:64px;padding:9px clamp(12px,2vw,26px);gap:16px;
+    background:linear-gradient(100deg,rgba(12,23,40,.99),rgba(18,34,56,.98));
+    border-bottom:1px solid rgba(96,165,250,.22);box-shadow:0 7px 24px rgba(0,0,0,.3);
+}
+.puan-guvence-main {gap:12px;flex:1 1 auto;}
+.puan-guvence-dot {width:11px;height:11px;flex-basis:11px;}
+.puan-guvence-copy strong {font-size:13px;letter-spacing:.01em;}
+.puan-guvence-copy span {max-width:min(62vw,900px);font-size:11px;line-height:1.4;}
+.puan-guvence-actions {gap:11px;}
+.puan-guvence-connection {display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border:1px solid #334155;border-radius:999px;background:rgba(15,23,42,.55);}
+.puan-guvence-connection.is-online::before,.puan-guvence-connection.is-offline::before {content:"";width:7px;height:7px;border-radius:50%;background:#22c55e;}
+.puan-guvence-connection.is-offline::before {background:#f59e0b;}
+.puan-guvence-actions .bildirim-merkezi-button {
+    display:inline-flex;align-items:center;gap:8px;padding:9px 13px;border-radius:10px;
+    border:1px solid #4777a8;background:#19385b;color:#eff6ff;font-size:12px;
+    box-shadow:0 3px 10px rgba(0,0,0,.18);transition:background .15s,border-color .15s,transform .15s;
+}
+.puan-guvence-actions .bildirim-merkezi-button:hover {background:#214a76;border-color:#60a5fa;transform:translateY(-1px);}
+.bildirim-merkezi-button > span {font-size:16px;line-height:1;}
+.bildirim-merkezi-button b {display:inline-grid;place-items:center;min-width:19px;height:19px;padding:0 5px;border-radius:999px;background:#dc2626;color:#fff;font-size:10px;}
+.home-juri-puan-card {
+    padding:19px 22px;border-color:rgba(96,165,250,.24);
+    background:linear-gradient(110deg,rgba(15,31,52,.98),rgba(16,39,63,.92));
+    box-shadow:0 12px 26px rgba(0,0,0,.16);
+}
+.home-juri-puan-intro {min-width:0;}
+.home-juri-puan-eyebrow {color:#7dd3fc;font-size:10px;letter-spacing:.12em;font-weight:800;}
+.home-juri-puan-card h2 {margin:5px 0 7px;font-size:18px;color:#f8fafc;}
+.home-puan-summary {max-width:620px;}
+.home-juri-puan-side {display:flex;align-items:center;gap:18px;flex:0 0 auto;}
+.home-juri-puan-count {display:flex;align-items:center;gap:9px;padding:7px 12px;border:1px solid #334155;border-radius:11px;background:rgba(2,6,23,.28);}
+.home-juri-puan-count strong {font-size:22px;color:#f8fafc;font-variant-numeric:tabular-nums;}
+.home-juri-puan-count span {max-width:70px;color:#94a3b8;font-size:10px;line-height:1.25;}
+.home-juri-puan-actions button {padding:9px 12px;font-size:11px;}
+.home-juri-puan-actions .home-notification-primary {border-color:#4777a8;background:#19385b;color:#eff6ff;}
+.puan-guvence-overlay {backdrop-filter:blur(5px);padding:clamp(10px,2vw,22px);}
+.puan-guvence-modal {width:min(920px,96vw);max-height:min(88vh,900px);border-color:#3b526e;border-radius:18px;}
+.puan-guvence-modal-head {padding:17px 20px;background:linear-gradient(100deg,#12243b,#172d49);}
+.puan-guvence-modal-head h2 {font-size:20px;letter-spacing:-.02em;}
+.puan-guvence-modal-head button {width:34px;height:34px;font-size:17px;}
+.puan-guvence-modal-body {padding:clamp(12px,2vw,20px);}
+.bildirim-summary {display:flex;align-items:flex-start;gap:12px;padding:14px 15px;margin-bottom:20px;border:1px solid #475569;border-radius:13px;background:#15263c;}
+.bildirim-summary-success {border-color:#1d6945;background:rgba(20,83,45,.2);}
+.bildirim-summary-warning {border-color:#9a6a1c;background:rgba(120,74,8,.16);}
+.bildirim-summary-neutral {border-color:#385a7c;background:rgba(30,64,99,.18);}
+.bildirim-summary-icon {display:grid;place-items:center;width:27px;height:27px;flex:0 0 27px;border-radius:50%;background:#334155;color:#f8fafc;font-weight:900;}
+.bildirim-summary-success .bildirim-summary-icon {background:#166534;}
+.bildirim-summary-warning .bildirim-summary-icon {background:#92400e;}
+.bildirim-summary div strong {font-size:13px;color:#f8fafc;}
+.bildirim-summary p {margin:4px 0 0;color:#cbd5e1;font-size:12px;line-height:1.5;}
+.bildirim-section-head {display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 9px;}
+.bildirim-section-head h3 {margin:0;color:#e2e8f0;font-size:14px;}
+.bildirim-section-head span {color:#94a3b8;font-size:11px;}
+.bildirim-item {padding:13px 14px;margin-bottom:9px;border:1px solid #334155;border-radius:12px;background:#101f33;}
+.bildirim-item-success {border-left:3px solid #22c55e;}
+.bildirim-item-error {border-left:3px solid #ef4444;}
+.bildirim-item-warning,.bildirim-item-queued,.bildirim-item-pending {border-left:3px solid #f59e0b;}
+.bildirim-item-head {display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+.bildirim-item-head strong {color:#f1f5f9;font-size:12px;}
+.bildirim-item-head time,.bildirim-item-head span {color:#a5b4c6;font-size:10px;text-align:right;}
+.bildirim-item p {margin:7px 0;color:#cbd5e1;font-size:11px;line-height:1.5;}
+.bildirim-item small {color:#94a3b8;font-size:10px;line-height:1.5;}
+.bildirim-error {color:#fecaca !important;border-top:1px solid rgba(248,113,113,.18);padding-top:7px;}
+.bildirim-history-row {display:flex;gap:10px;padding:10px 3px;border-bottom:1px solid rgba(71,85,105,.45);}
+.bildirim-history-row:last-child {border-bottom:0;}
+.bildirim-history-dot {width:8px;height:8px;flex:0 0 8px;margin-top:5px;border-radius:50%;background:#94a3b8;}
+.bildirim-history-dot.durum-success {background:#22c55e;}
+.bildirim-history-dot.durum-error {background:#ef4444;}
+.bildirim-history-dot.durum-queued,.bildirim-history-dot.durum-warning,.bildirim-history-dot.durum-pending {background:#f59e0b;}
+.bildirim-history-row div {min-width:0;}
+.bildirim-history-row strong {color:#e2e8f0;font-size:11px;}
+.bildirim-history-row p {margin:3px 0;color:#cbd5e1;font-size:11px;line-height:1.45;}
+.bildirim-history-row small {color:#94a3b8;font-size:10px;}
+.bildirim-empty {padding:13px;border:1px dashed #3d536e;border-radius:10px;color:#aab9ca;background:rgba(15,23,42,.45);font-size:11px;line-height:1.5;}
+.bildirim-footer-actions {display:flex;gap:9px;flex-wrap:wrap;margin-top:18px;padding-top:15px;border-top:1px solid #334155;}
+.bildirim-footer-actions button {padding:9px 12px;border:1px solid #45698e;border-radius:9px;background:#173452;color:#eaf4ff;font-size:11px;font-weight:700;cursor:pointer;}
+.bildirim-disclaimer {margin:14px 0 0;color:#8798ad;font-size:10px;line-height:1.5;}
+@media (max-width:850px) {
+ body {padding-top:100px;}
+ .puan-guvence-bar {min-height:92px;align-items:flex-start;flex-direction:column;gap:7px;padding:8px 12px;}
+ .puan-guvence-copy span {max-width:94vw;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+ .puan-guvence-actions {width:100%;justify-content:space-between;}
+ .home-juri-puan-card {align-items:flex-start;flex-direction:column;}
+ .home-juri-puan-side {width:100%;justify-content:space-between;flex-wrap:wrap;}
+}
+@media (max-width:520px) {
+ body {padding-top:118px;}
+ .puan-guvence-copy strong {font-size:12px;}
+ .puan-guvence-copy span {font-size:10px;}
+ .puan-guvence-actions .bildirim-merkezi-button {padding:7px 10px;font-size:11px;}
+ .home-juri-puan-side {align-items:flex-start;flex-direction:column;}
+ .home-juri-puan-actions {width:100%;}
+ .home-juri-puan-actions button {flex:1;}
+ .bildirim-item-head {flex-direction:column;gap:5px;}
+ .bildirim-item-head time,.bildirim-item-head span {text-align:left;}
+ .puan-guvence-modal-head h2 {font-size:17px;}
+}
