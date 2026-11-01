@@ -76,9 +76,9 @@
         const online=!!r.online&&!stale;
         const pending=Number(r.pendingCount||0);
         const lastStatus=String(r.lastScoreStatus||'');
-        const statusTone=pending?'warning':lastStatus==='error'?'error':lastStatus==='success'?'success':lastStatus==='queued'||lastStatus==='pending'?'warning':'neutral';
+        const statusTone=pending?'warning':lastStatus==='error'?'error':lastStatus==='success'?'success':['queued','pending','warning'].includes(lastStatus)?'warning':'neutral';
         const connText=online?'Bağlı':r.connectionStatus==='oturum_kapali'?'Jüri oturumu kapatıldı':lastSeen?'Bağlantı yok':'Henüz giriş yapmadı';
-        const stateText=!lastSeen?'Henüz durum kaydı yok':pending?pending+' puan kuyrukta':lastStatus==='success'?'Son puan doğrulandı':lastStatus==='error'?'Son gönderimde hata':lastStatus==='queued'?'Gönderim bekliyor':r.screen==='puanlama'?'Puanlama ekranında':r.screen==='juri_secim'?'Jüri seçim ekranında':'Hazır';
+        const stateText=!lastSeen?'Henüz durum kaydı yok':pending?pending+' puan kuyrukta':lastStatus==='success'?'Son puan doğrulandı':lastStatus==='error'?'Son gönderimde hata':lastStatus==='warning'?'Gönderim/arşiv uyarısı':lastStatus==='queued'||lastStatus==='pending'?'Gönderim bekliyor':r.screen==='puanlama'?'Puanlama ekranında':r.screen==='juri_secim'?'Jüri seçim ekranında':'Hazır';
         const identity=r.ad||officialName||'Jüri oturumu henüz açılmadı';
         const roleName=r.yedekMi?'Yedek jüri · '+(r.yedekYerine||label)+' koltuğu':label;
         const currentMatch=[r.macEtiketi,r.taraf,r.okul].filter(Boolean).join(' · ');
@@ -111,7 +111,7 @@
         const records=seats.map(x=>data?.[x.key]||null);
         const online=records.filter(r=>r&&r.online&&Number(r.lastSeenAt||r.lastSeenClientAt)&&Date.now()-Number(r.lastSeenAt||r.lastSeenClientAt)<=75000).length;
         const pending=records.reduce((n,r)=>n+Number(r?.pendingCount||0),0);
-        const errors=records.filter(r=>r&&(r.lastScoreStatus==='error'||Number(r.pendingCount||0)>0)).length;
+        const errors=records.filter(r=>r&&(r.lastScoreStatus==='error'||r.lastScoreStatus==='warning'||Number(r.pendingCount||0)>0)).length;
         summary.innerHTML='<div class="admin-jury-summary-stat"><b>'+online+'/3</b><span>Bağlı jüri</span></div>'+
             '<div class="admin-jury-summary-stat"><b>'+pending+'</b><span>Bekleyen puan</span></div>'+
             '<div class="admin-jury-summary-stat"><b>'+errors+'</b><span>Kontrol gerektiren cihaz</span></div>'+
@@ -142,6 +142,9 @@
         });
         // Bağlanmamış tabletler için de resmî görevlendirilmiş jüri isimlerini göster.
         db.ref('fikstur/tekSalon_2026_2027/juries/'+gun+'/'+kategori).once('value').then(snap=>{
+            const selectedDate=document.getElementById('juriCanliGun')?.value;
+            const selectedCategory=document.getElementById('juriCanliKategori')?.value;
+            if(selectedDate!==gun||selectedCategory!==kategori)return;
             const roster=snap.val()||{};
             juriCanliResmiAdlari={
                 juri1:roster.asil1?.name||'',
