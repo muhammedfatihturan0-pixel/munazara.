@@ -1,133 +1,3 @@
-// --- ENTEGRE FIKSTUR / TURNUVA YONETIM MODULU ---
-    // ProgramOlusturma.html uygulamasi izolasyon icin iframe srcdoc icinde calisir.
-    // Bu sayede kendi CSS/JS/localStorage anahtarlari ana puanlama arayuzuyle cakisma yapmaz.
-
-    function base64Utf8Coz(b64) {
-        const raw = atob(b64);
-        const bytes = new Uint8Array(raw.length);
-        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-        return new TextDecoder('utf-8').decode(bytes);
-    }
-
-
-    // Yönetici dışındaki jüri ekranını değiştirmeden resmî ilk turda kontrollü istisna.
-    const FIKSTUR_ISTISNA_YOLU='fikstur/tekSalon_2026_2027';
-    const FIKSTUR_ISTISNA_SEANSLAR=['08:45 - 10:00','10:15 - 11:30','13:30 - 14:45','15:00 - 16:15'];
-    let fiksturIstisnaListe=[];
-    let fiksturIstisnaTumMaclar=[];
-    let fiksturIstisnaOkullar={};
-    let fiksturIstisnaState=null;
-    function fiksturIstisnaNorm(str){return String(str||'').normalize('NFC').replace(/\s+/g,' ').trim().toLocaleLowerCase('tr-TR');}
-    function fiksturIstisnaGeciciSayfa(){
-      if(!adminYetkiliMi())return alert('Yönetici yetkisi gerekiyor.');
-      const host=document.getElementById('app');if(!host)return;
-      host.innerHTML=`<div class="card" style="max-width:980px">
-        <h2>🔄 Yönetici · Fikstür Değişiklikleri</h2>
-        <p class="sure-hint">Resmî 1–35 numaralı ilk tur maçları korunur. Maç taşıma, maç numarasını değiştirmez. Önceden puanlanmış, kesinleşmiş veya galibi seçilmiş maçlar değiştirilemez.</p>
-        <div id="fIstDurum" class="puanlama-bilgi">Resmî fikstür ve okul listeleri yükleniyor…</div>
-        <label class="puanlama-etiket">İşlem</label>
-        <select id="fIstTur" onchange="fiksturIstisnaFormunuGuncelle()">
-          <option value="replace">Maçtaki okulu değiştir</option>
-          <option value="move">Karşılaşmayı boş gün / seansa taşı</option>
-          <option value="add">#35 · Bekleyen rakibi belirle</option>
-          <option value="pair">#35 · Rakipsiz okulu 2. turda rakiple eşleştir</option>
-        </select>
-        <label class="puanlama-etiket">Kategori</label>
-        <select id="fIstKategori" onchange="fiksturIstisnaFormunuGuncelle()"><option value="LİSE">LİSE</option><option value="ORTAOKUL">ORTAOKUL</option></select>
-        <label class="puanlama-etiket">Resmî maç</label><select id="fIstMac" onchange="fiksturIstisnaFormunuGuncelle()"></select>
-        <div id="fIstEski" class="puanlama-bilgi" style="margin-top:10px;"></div>
-        <div id="fIstUstTurEslestirme" style="display:none;margin:10px 0;padding:12px;border:1px solid var(--border);border-radius:8px;">
-          <label class="puanlama-etiket">Şehit Öğretmen Şevki Akgün'ün 2. turdaki rakibi</label>
-          <select id="fIstR2Rakip" style="width:100%;padding:10px;border-radius:7px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);"></select>
-          <div id="fIstR2Bilgi" class="sure-hint">Rakip, 1. tur galipleri arasından seçilir.</div>
-        </div>
-        <div id="fIstOkulAlanlari">
-          <label class="puanlama-etiket">Hükümet okulu</label><input id="fIstHuk" list="fIstOkullar" autocomplete="off" placeholder="Okul adı">
-          <label class="puanlama-etiket">Muhalefet okulu</label><input id="fIstMuh" list="fIstOkullar" autocomplete="off" placeholder="Okul adı">
-        </div>
-        <datalist id="fIstOkullar"></datalist>
-        <div id="fIstZamanAlanlari">
-          <label class="puanlama-etiket">Yeni tarih (boş gün seçilebilir)</label><input id="fIstTarih" type="date" min="2026-10-19">
-          <label class="puanlama-etiket">Yeni seans</label><select id="fIstSeans">${FIKSTUR_ISTISNA_SEANSLAR.map(s=>`<option value="${s}">${s}</option>`).join('')}</select>
-        </div>
-        <label class="puanlama-etiket">Değişiklik gerekçesi (zorunlu)</label>
-        <textarea id="fIstGerekce" rows="2" placeholder="Örn. Karşı okul maça katılamadığından alternatif okul görevlendirildi."></textarea>
-        <div class="sure-hint">Yeni tarih için jüri görevlendirmesini ayrıca kontrol et. Resmî olmayan öğretmen ataması yapılmaz; önceki puanlar ve turnuva ağacı otomatik silinmez.</div>
-        <button class="btn" style="background:#0f766e" id="fIstKaydet" onclick="fiksturIstisnayiKaydet()">🔒 Yönetici Olarak Kaydet</button>
-        <button class="btn" style="background:#475569" onclick="renderYoneticiMenu()">← Yönetici Menüsü</button>
-      </div>`;
-    }
-    async function renderFiksturIstisnaYonetimi(){
-      if(!adminYetkiliMi())return alert('Yönetici yetkisi gerekli.');
-      if(!navigator.onLine||!firebaseBagli)return alert('Fikstür değişiklikleri için Firebase bağlantısı gerekli.');
-      dinleyicileriTemizle();
-      fiksturIstisnaGeciciSayfa();
-      window._fIstLastSource='';
-      try{
-        const liste=await puanlamaFiksturMaclariniOku();
-        const [fSnap,lSnap,oSnap]=await Promise.all([
-          db.ref(FIKSTUR_ISTISNA_YOLU).once('value'), db.ref('okullar/LİSE').once('value'),db.ref('okullar/ORTAOKUL').once('value')
-        ]);
-        if(!document.getElementById('fIstMac'))return;
-        if(!fSnap.exists()||!fSnap.val()?.juries||!fSnap.val()?.topics)throw new Error('Ortak fikstür yüklenmedi.');
-        fiksturIstisnaTumMaclar=liste;
-        // Taşınan maç için oluşan eski BOŞ konum, ayrı maç gibi listelenmez.
-        const latest=new Map();
-        for(const m of liste.filter(m=>m.no>=1&&m.no<=35&&!m.isBay)){
-          if(!latest.has(m.no)||(!m.isEmpty&&latest.get(m.no).isEmpty))latest.set(m.no,m);
-        }
-        fiksturIstisnaListe=[...latest.values()].sort((a,b)=>a.no-b.no);
-        fiksturIstisnaState=fSnap.val();
-        fiksturIstisnaOkullar={'LİSE':lSnap.val()||{},'ORTAOKUL':oSnap.val()||{}};
-        document.getElementById('fIstDurum').textContent='Merkezî fikstür yüklendi. Değişiklikler işlem sonunda tüm güncel cihazlarda görünür.';
-        fiksturIstisnaFormunuGuncelle();
-      }catch(e){const x=document.getElementById('fIstDurum');if(x){x.className='puanlama-bilgi hata';x.textContent='Fikstür yüklenemedi: '+(e?.message||e);}}
-    }
-    function fiksturIstisnaFormunuGuncelle(){
-      const op=document.getElementById('fIstTur')?.value,kat=document.getElementById('fIstKategori')?.value;
-      const listEl=document.getElementById('fIstMac'); if(!listEl)return;
-      const prev=listEl.value;
-      const matches=fiksturIstisnaListe.filter(m=>(op==='add'||op==='pair')?(m.no===35 && (m.isPending||m.isEmpty)):(m.cat===(kat==='LİSE'?'lise':'ortaokul') && !m.isEmpty && m.roundTitle==='1. Eleme Turu'));
-      listEl.innerHTML=matches.map(m=>`<option value="${m.no}">#${m.no} · ${htmlEscape(m.team1)} / ${htmlEscape(m.team2)}</option>`).join('');
-      if(matches.some(m=>String(m.no)===prev))listEl.value=prev;
-      if(op==='add'||op==='pair')document.getElementById('fIstKategori').value='ORTAOKUL';
-      const m=matches.find(m=>String(m.no)===listEl.value);
-      const status=document.getElementById('fIstEski');
-      if(status)status.textContent=m?(op==='bye'?`#${m.no} · Rakipsiz okul: ${m.team1==='BOŞ'?m.team2:m.team1} · Onaylanırsa 2. Eleme Turu'na BYE ile aktarılır.`:`#${m.no} · ${m.dateStr} · ${m.time} · ${m.team1} / ${m.team2}`):'Bu işlem için uygun boş maç bulunamadı.';
-      const schools=new Set([...Object.keys(fiksturIstisnaOkullar[document.getElementById('fIstKategori').value]||{}),...fiksturIstisnaListe.filter(m=>m.cat===(document.getElementById('fIstKategori').value==='LİSE'?'lise':'ortaokul')).flatMap(m=>[m.team1,m.team2])]);
-      schools.delete('BOŞ');document.getElementById('fIstOkullar').innerHTML=[...schools].sort((a,b)=>a.localeCompare(b,'tr')).map(x=>`<option value="${htmlEscape(x)}"></option>`).join('');
-      document.getElementById('fIstOkulAlanlari').style.display=(op==='move'||op==='pair')?'none':'block';
-      document.getElementById('fIstZamanAlanlari').style.display=(op==='replace'||op==='pair')?'none':'block';
-      const r2Box=document.getElementById('fIstUstTurEslestirme');
-      const r2Select=document.getElementById('fIstR2Rakip');
-      if(r2Box)r2Box.style.display=op==='pair'?'block':'none';
-      if(op==='pair'&&r2Select){
-        const keep=r2Select.value;
-        const raw=fiksturIstisnaState?.winners||{};
-        const m35=fiksturIstisnaListe.find(x=>x.no===35);
-        const school=m35?(m35.team1==='BOŞ'?m35.team2:m35.team1):'';
-        const previousBays=Object.entries(fiksturIstisnaState?.bayDraws||{}).filter(([k])=>k!=='orta_r2').map(([,v])=>fiksturIstisnaNorm(v));
-        const winners=Array.from({length:24},(_,i)=>11+i).map(no=>({no,school:raw[no]}))
-          .filter(x=>x.school&&fiksturIstisnaNorm(x.school)!==fiksturIstisnaNorm(school)&&!previousBays.includes(fiksturIstisnaNorm(x.school)));
-        r2Select.innerHTML='<option value="">1. tur galiplerinden rakip seçiniz</option>'+
-          winners.map(x=>'<option value="'+x.no+'">#'+x.no+' maç galibi · '+htmlEscape(x.school)+'</option>').join('');
-        if(winners.some(x=>String(x.no)===keep))r2Select.value=keep;
-        const hint=document.getElementById('fIstR2Bilgi');
-        if(hint)hint.textContent='1. turdaki 24 maçın galipleri arasından rakip seçilir. 25 takım olacağı için başka bir uygun takım BAY alacak; Şevki Akgün gerçek maç yapacak.';
-        if(r2Select.options.length===1&&hint)hint.textContent='Henüz seçilebilir kesinleşmiş 1. tur galibi yok. Maç sonuçları geldikçe liste dolacak.';
-      }
-      const huk=document.getElementById('fIstHuk'),muh=document.getElementById('fIstMuh'),date=document.getElementById('fIstTarih'),time=document.getElementById('fIstSeans');
-      // Aynı maçın tekrar seçilmesinde kullanıcı düzenlemesini ezmemek için kaynak değişince doldur.
-      const key=`${op}:${m?.no||0}`;
-      if(window._fIstLastSource!==key){
-        if(huk)huk.value=(m?.team1==='BOŞ'||m?.isEmpty)?'':m?.team1||'';
-        if(muh)muh.value=(m?.team2==='BOŞ'||m?.isEmpty)?'':m?.team2||'';
-        if(date)date.value=m?.dateISO||'2026-11-02';
-        if(time)time.value=FIKSTUR_ISTISNA_SEANSLAR.includes(m?.time)?m.time:FIKSTUR_ISTISNA_SEANSLAR[0];
-        window._fIstLastSource=key;
-      }
-    }
-
     async function fiksturRakipsizOkuluUstTurdaEslestir(m,opponentMatchNo,reason){
       if(!adminYetkiliMi()||!firebaseBagli||!navigator.onLine)throw new Error('Çevrimiçi yönetici yetkisi gerekli.');
       if(!m||Number(m.no)!==35||m.cat!=='ortaokul'||!m.isPending)throw new Error('Bu işlem yalnızca rakibi belirlenmemiş ortaokul #35 için kullanılabilir.');
@@ -201,8 +71,10 @@
       if(op==='pair'){
         if(!m||no!==35)return alert('Bu işlem yalnızca rakipsiz #35 için kullanılabilir.');
         const opponentNo=document.getElementById('fIstR2Rakip')?.value;
+        const byeNo=document.getElementById('fIstR2Bay')?.value;
         const reason=puanMetniNormalize(document.getElementById('fIstGerekce')?.value);
-        try{await fiksturRakipsizOkuluUstTurdaEslestir(m,opponentNo,reason);}
+        if(!opponentNo||!byeNo)return alert('2. tur rakibini ve BAY alacak okulu ayrı ayrı seçin.');
+        try{await fiksturRakipsizOkuluUstTurdaEslestir(m,opponentNo,byeNo,reason);}
         catch(err){alert('2. tur eşleşmesi yapılamadı: '+(err?.message||err));}
         return;
       }
@@ -250,82 +122,78 @@
           ['orta_r2','orta_r3','orta_r4','orta_sf'].some(x=>!!current?.bayDraws?.[x]);
         if(sonrakiTurKaydi)return alert('İkinci tur sonuçları/BAY kuraları bulunduğundan #35 artık doldurulamaz. Eleme ağacı korunuyor.');
       }
-      // Boş #35 daha önce kullanılmadıysa kaynakta puan bulunmaz.
-      const display=`#${no} ${m.team1} / ${m.team2}\n→ ${yeniTakim1} / ${yeniTakim2}\n${m.dateISO} ${m.time}\n→ ${date} ${time}\nGerekçe: ${reason}`;
-      if(!confirm('YÖNETİCİ FİKSTÜR DEĞİŞİKLİĞİ\n\n'+display+'\n\nİşlem Firebase üzerinde saklanacak. Onaylıyor musunuz?'))return;
-      const btn=document.getElementById('fIstKaydet');if(btn)btn.disabled=true;
-      try{
-        await db.ref(`arsiv/fiksturDegisiklikleri/${Date.now()}_${no}`).set({before:current,oldMatch:oldMatch||null,proposal:{no,op,team1:yeniTakim1,team2:yeniTakim2,date,time,reason},createdAt:firebase.database.ServerValue.TIMESTAMP});
-        const oldRevision=current?.updatedAt;
-        const oldOverride=JSON.stringify(current?.adminOverrides?.[no]||null);
-        const result=await fRef.transaction(cur=>{
-          if(!cur||!cur.juries||!cur.topics||cur.updatedAt!==oldRevision||JSON.stringify(cur.adminOverrides?.[no]||null)!==oldOverride)return;
-          if(cur.winners?.[no]||cur.finalizedMatches?.[no])return;
-          cur.adminOverrides=cur.adminOverrides||{};
-          cur.adminOverrides[no]={no,cat:m.cat,team1:yeniTakim1,team2:yeniTakim2,date,time,reason,operation:op,updatedAt:Date.now()};
-          cur.updatedAt=Date.now();cur.sonIslem='yoneticiFiksturDegisikligi';
-          return cur;
-        },undefined,false);
-        if(!result.committed)throw new Error('Fikstür başka bir cihazda değişti. Yenileyip tekrar deneyin.');
-        // Okulu değişen, puansız ve açık eski operasyon kaydı fikstürde ikinci maç gibi kalmasın.
-        const newId=macKimligiOlustur(kat,yeniTakim1,yeniTakim2);
-        let eskiKayitUyarisi='';
-        if(newId!==oldId && oldMatch && oldMatch.durum==='acik' && !oldMatch.sonuc?.kazanan){
-          try{
-            const cleanup=await pRef.transaction(cur=>{
-              if(!cur || cur.durum!=='acik' || cur.updatedAt!==oldMatch.updatedAt || cur.sonuc?.kazanan)return;
-              return null;
-            },undefined,false);
-            if(!cleanup.committed)eskiKayitUyarisi=' Eski boş maç kaydının yönetici panelinden ayrıca kontrol edilmesi gerekebilir.';
-          }catch(_){eskiKayitUyarisi=' Eski operasyon kaydı otomatik temizlenemedi; yönetici panelinden kontrol edin.';}
-        }
-        alert('Fikstür güncellendi. Maç numarası korundu. Yeni tarih için jüri görevlendirmesini kontrol edin.'+eskiKayitUyarisi);
-        await renderFiksturIstisnaYonetimi();
-      }catch(err){alert('Fikstür değiştirilemedi: '+(err?.message||err));}
-      finally{const b=document.getElementById('fIstKaydet');if(b)b.disabled=false;}
+      // Boş #35 daha önce ku    async function fiksturRakipsizOkuluUstTurdaEslestir(m,opponentMatchNo,byeMatchNo,reason){
+      if(!adminYetkiliMi()||!firebaseBagli||!navigator.onLine)throw new Error('Çevrimiçi yönetici yetkisi gerekli.');
+      if(!m||Number(m.no)!==35||m.cat!=='ortaokul'||!m.isPending)throw new Error('Bu işlem yalnızca rakibi belirlenmemiş ortaokul #35 için kullanılabilir.');
+      const realSchool=x=>!!x&&!['boş','bay'].includes(fiksturIstisnaNorm(x));
+      const school=[m.team1,m.team2].find(realSchool);
+      if(!school)throw new Error('35. maçta gerçek okul bulunamadı.');
+      if(reason.length<12)throw new Error('Gerekçe en az 12 karakter olmalıdır.');
+      const opponentNo=Number(opponentMatchNo),byeNo=Number(byeMatchNo);
+      if(!Number.isInteger(opponentNo)||opponentNo<11||opponentNo>34)throw new Error('Geçerli bir rakip maç galibi seçiniz.');
+      if(!Number.isInteger(byeNo)||byeNo<11||byeNo>34||byeNo===opponentNo)throw new Error('Rakipten farklı, geçerli bir BAY alacak okul seçiniz.');
+      const macId=macKimligiOlustur('ORTAOKUL',m.team1,m.team2);
+      const [currentSnap,scoreSnap,matchSnap]=await Promise.all([
+        db.ref(FIKSTUR_ISTISNA_YOLU).once('value'),
+        db.ref('puanlar/ORTAOKUL').once('value'),
+        db.ref('maclar/ORTAOKUL/'+macId).once('value')
+      ]);
+      const current=currentSnap.val();
+      if(!current||!current.juries||!current.topics)throw new Error('Merkezî fikstür yüklenemedi.');
+      let scored=false;scoreSnap.forEach(c=>{if(kayitMacId(c.val())===macId)scored=true;});
+      if(scored||matchSnap.val()?.sonuc)throw new Error('35. maçta puan veya sonuç kaydı var. Puanlı karşılaşma yeniden eşleştirilemez.');
+      if(current.winners?.[35]&&current.winners[35]!==school)throw new Error('35. maçta farklı bir galip kayıtlı.');
+      if(current.finalizedMatches?.[35])throw new Error('35. maçta kesinleşmiş sonuç kaydı var.');
+      if(current.bayDraws?.orta_r2||current.roundPairings?.orta_r2)
+        throw new Error('2. tur eşleşmesi/BAY ataması daha önce kaydedilmiş. Mevcut atamanın üzerine yazılmadı.');
+      const winners=current.winners||{};
+      const firstRoundWinners=Array.from({length:24},(_,i)=>({no:11+i,school:winners[11+i]}));
+      if(firstRoundWinners.some(x=>!x.school))throw new Error('Önce ortaokul 1. turdaki 24 maçın tamamının galibi kesinleşmeli.');
+      const opponent=firstRoundWinners.find(x=>x.no===opponentNo)?.school;
+      const byeTeam=firstRoundWinners.find(x=>x.no===byeNo)?.school;
+      if(!opponent||!byeTeam)throw new Error('Seçilen rakip veya BAY alacak takım artık mevcut değil; listeyi yenileyin.');
+      if(fiksturIstisnaNorm(opponent)===fiksturIstisnaNorm(school)||fiksturIstisnaNorm(byeTeam)===fiksturIstisnaNorm(school))
+        throw new Error('Rakipsiz okul kendisiyle eşleştirilemez veya kendisine BAY verilemez.');
+      if(fiksturIstisnaNorm(byeTeam)===fiksturIstisnaNorm(opponent))
+        throw new Error('Bir okul aynı turda hem rakip hem BAY alacak takım olamaz.');
+      const previousBays=Object.entries(current.bayDraws||{}).filter(([k])=>k!=='orta_r2').map(([,v])=>fiksturIstisnaNorm(v));
+      if(previousBays.includes(fiksturIstisnaNorm(opponent)))
+        throw new Error('Seçilen rakip daha önce BAY kullanmış; sonraki turda rakibi olmalı.');
+      if(previousBays.includes(fiksturIstisnaNorm(byeTeam)))
+        throw new Error('Seçilen BAY takımı daha önce BAY kullanmış; başka bir okul seçin.');
+      const later=Object.keys(winners).some(x=>Number(x)>=41&&Number(x)<=53)||
+        Object.keys(current.finalizedMatches||{}).some(x=>Number(x)>=41&&Number(x)<=53)||
+        ['orta_r3','orta_r4','orta_sf'].some(x=>!!current.bayDraws?.[x]);
+      if(later)throw new Error('Ortaokul 2. tur veya sonraki turlarda sonuç/BAY kaydı var. Fikstür güvenliği için eşleşme değiştirilemez.');
+      const display='#35 · '+school+'\n2. tur rakibi: #'+opponentNo+' galibi · '+opponent+
+        '\n2. tur BAY alacak okul: #'+byeNo+' galibi · '+byeTeam+
+        '\nGerekçe: '+reason+'\n\nRakip ve BAY ataması yönetici seçimiyle kaydedilecek; rastgele BAY yapılmayacak.';
+      if(!confirm('2. TUR EŞLEŞMESİ VE BAY ATAMASINI ONAYLA\n\n'+display+'\nDevam edilsin mi?'))return;
+      const auditRef=db.ref('arsiv/fiksturDegisiklikleri/'+Date.now()+'_35_pair');
+      await auditRef.set({before:current,school,opponent,opponentMatchNo:opponentNo,byeTeam,byeMatchNo:byeNo,reason,operation:'yonetici_2_tur_eslestirme',createdAt:firebase.database.ServerValue.TIMESTAMP});
+      const result=await db.ref(FIKSTUR_ISTISNA_YOLU).transaction(cur=>{
+        if(!cur||!cur.juries||!cur.topics||cur.updatedAt!==current.updatedAt)return;
+        if(cur.winners?.[35]&&cur.winners[35]!==school)return;
+        if(cur.finalizedMatches?.[35]||cur.bayDraws?.orta_r2||cur.roundPairings?.orta_r2)return;
+        if(Object.keys(cur.winners||{}).some(x=>Number(x)>=41&&Number(x)<=53)||
+           Object.keys(cur.finalizedMatches||{}).some(x=>Number(x)>=41&&Number(x)<=53)||
+           ['orta_r3','orta_r4','orta_sf'].some(x=>!!cur.bayDraws?.[x]))return;
+        cur.winners=cur.winners||{};cur.winnerSources=cur.winnerSources||{};
+        cur.bayDraws=cur.bayDraws||{};cur.roundPairings=cur.roundPairings||{};
+        cur.winners[35]=school;
+        cur.winnerSources[35]={source:'yonetici_2_tur_eslestirme',updatedAt:Date.now(),reason};
+        cur.bayDraws.orta_r2=byeTeam;
+        cur.roundPairings.orta_r2={school,opponent,opponentMatchNo:opponentNo,byeTeam,byeMatchNo:byeNo,reason,updatedAt:Date.now()};
+        cur.updatedAt=Date.now();cur.sonIslem='yonetici_2_tur_eslestirme';
+        return cur;
+      },undefined,false);
+      if(!result.committed)throw new Error('Fikstür başka cihazda değişti veya üst tur sonucu oluştu. Mevcut kayıtlar korunarak işlem durduruldu.');
+      try{await auditRef.update({status:'uygulandi',updatedAt:firebase.database.ServerValue.TIMESTAMP});}catch(e){console.warn('İşlem günlüğü güncellenemedi:',e);}
+      alert(school+', 2. turda '+opponent+' ile eşleştirildi. '+byeTeam+' ise yönetici tarafından BAY atandı.');
+      await renderFiksturIstisnaYonetimi();
     }
 
-    function renderTurnuva() {
-        dinleyicileriTemizle();
-        document.getElementById('app').innerHTML = `
-            <main class="fixture-shell">
-                <header class="fixture-toolbar no-print">
-                    <div class="fixture-toolbar-title">
-                        <strong>Fikstür ve Öğretmen Görevlendirmeleri</strong>
-                        <span>Maç ve görev dağılımı korunur · Sonuçlar Firebase üzerinden güncellenir.</span>
-                    </div>
-                    <nav class="fixture-toolbar-actions" aria-label="Fikstür araçları">
-                        <button class="btn" style="background:#1d4ed8;border-color:#3b82f6;" onclick="turnuvaFiksturTamEkran()">⛶ Tam ekran</button>
-                        <button class="btn" onclick="renderFiksturIstisnaYonetimi()">🔄 Okul / Maç Değiştir</button>
-                        <button class="btn" onclick="anaMenu()">← Ana menü</button>
-                        <details class="fixture-extra">
-                            <summary>Diğer görünüm ▾</summary>
-                            <div class="fixture-extra-pop"><button onclick="renderMerkeziTurnuva()">Canlı Puan Ağacı</button></div>
-                        </details>
-                    </nav>
-                </header>
-                <iframe id="turnuvaFiksturFrame" title="Iğdır MEM Münazara Fikstür Yönetimi" allow="clipboard-read; clipboard-write" style="width:100%;height:85vh;min-height:720px;border:1px solid var(--border-color);border-radius:12px;background:#090d16;display:block;"></iframe>
-            </main>`;
-        const frame = document.getElementById('turnuvaFiksturFrame');
-        if (frame) frame.srcdoc = base64Utf8Coz(TURNUVA_FIKSTUR_B64);
-    }
-
-    function turnuvaFiksturTamEkran() {
-        const frame = document.getElementById('turnuvaFiksturFrame');
-        if (!frame) return;
-        if (frame.requestFullscreen) frame.requestFullscreen();
-        else if (frame.webkitRequestFullscreen) frame.webkitRequestFullscreen();
-    }
-
-    function renderMerkeziTurnuva() {
-        dinleyicileriTemizle();
-        document.getElementById('app').innerHTML=`
-            <div class="card" style="max-width:1050px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-                    <h2 style="margin-bottom:0;">Turnuva Ağacı Finalleri · Merkezi</h2>
-                    <button class="btn" style="width:auto;margin:0;background:#475569;" onclick="renderTurnuva()">← Fikstür Yönetimine Dön</button>
-                </div>
-                <div class="btn-grid" style="grid-template-columns:1fr 1fr;margin-bottom:20px;"><button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this,'ORTAOKUL','turnuva')">ORTAOKUL AĞACI</button><button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this,'LİSE','turnuva')">LİSE AĞACI</button></div>
+="katSec(this,'LİSE','turnuva')">LİSE AĞACI</button></div>
                 <div style="margin-bottom:15px;font-size:14px;color:var(--text-muted);">Turnuva ağacı artık Firebase'de tutulur; aynı yönetici ekranı farklı cihazlarda aynı durumu görür. Değişiklikler transaction ile çakışmaya karşı korunur.</div>
                 <textarea id="takimlar" style="height:100px;" placeholder="Sistemde kayıtlı okul aranıyor..." readonly></textarea>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button class="btn" style="background:var(--primary);border:none;" onclick="ilkTuruKur()">🎲 Turnuvayı Başlat / Yeniden Kur</button><button class="btn" style="background:#ef4444;border:none;" onclick="turnuvayiSifirla()">Turnuvayı Sıfırla</button></div>
