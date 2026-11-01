@@ -30,6 +30,7 @@
     const JURI_CANLI_DURUM_YOLU='arsiv/juriCanliDurumlari';
     let juriCanliDurumAktifYol='';
     let juriCanliDisconnectKaydiYol='';
+    let juriCanliTakipYenileTick=null;
 
     function puanMetniNormalize(v) {
         return String(v ?? '').normalize('NFC').trim();
@@ -1052,6 +1053,8 @@
         if (aktifJuriMacListenerRef) { aktifJuriMacListenerRef.off(); aktifJuriMacListenerRef = null; }
         aktifCanliPanelRefs.forEach(r => { try { r.off(); } catch (_) {} });
         aktifCanliPanelRefs = [];
+        if(juriCanliTakipYenileTick){clearInterval(juriCanliTakipYenileTick);juriCanliTakipYenileTick=null;}
+        if(typeof aktifJuriCanliDurumMonitorRef!=='undefined')aktifJuriCanliDurumMonitorRef=null;
         if (aktifTurnuvaRef) { try { aktifTurnuvaRef.off(); } catch (_) {} aktifTurnuvaRef = null; }
         const monitorHost=document.getElementById('juriCanliTakipHost');
         if(monitorHost)monitorHost.innerHTML='';
