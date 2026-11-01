@@ -1,5 +1,5 @@
 
-    const APP_VERSION = '3.39 · Yönetici Paneli ve Bildirim Düzenlemesi';
+    const APP_VERSION = '3.40 · Yönetici Paneli, Manuel BAY ve Akıllı Jüri Arayüzü';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
