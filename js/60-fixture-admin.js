@@ -362,11 +362,27 @@
     function ustGezinmeyiGuncelle(){
         const app=document.getElementById('app');if(!app)return;
         let nav=document.getElementById('ustGezinme');
-        if(!nav){nav=document.createElement('nav');nav.id='ustGezinme';nav.className='global-nav no-print';
+        if(!nav){
+            nav=document.createElement('nav');nav.id='ustGezinme';nav.className='global-nav no-print';
             nav.setAttribute('aria-label','Ekran gezinme');
-            nav.innerHTML='<button onclick="ekranGeriDon()" title="Geri dön (Backspace)">← Geri</button><button onclick="anaMenu()" title="Ana menüye git">⌂ Ana Menü</button>';
+            nav.innerHTML='<button type="button" onclick="ekranGeriDon()" title="Geri dön (Backspace)">← Geri</button><button type="button" onclick="anaMenu()" title="Ana menüye git">⌂ Ana Menü</button>';
             document.body.appendChild(nav);
         }
+        let bell=nav.querySelector('#adminGlobalNotificationButton');
+        if(typeof adminYetkiliMi==='function'&&adminYetkiliMi()){
+            if(!bell){
+                bell=document.createElement('button');bell.id='adminGlobalNotificationButton';
+                bell.type='button';bell.className='admin-global-notification';
+                bell.onclick=()=>bildirimMerkeziniAc();
+                bell.title='Puan gönderim bildirimleri ve bekleyen kayıtlar';
+                nav.appendChild(bell);
+            }
+            const pending=typeof offlineKuyrukGetir==='function'
+                ?Object.values(offlineKuyrukGetir()).filter(x=>x&&x.kayit).length:0;
+            const unread=typeof puanBildirimOkunmamisSayisi==='function'?puanBildirimOkunmamisSayisi():0;
+            const badge=pending||unread;
+            bell.innerHTML='🔔 Bildirimler'+(badge?'<span class="admin-notification-count">'+badge+'</span>':'');
+        }else if(bell)bell.remove();
         const anasayfa=!!app.querySelector('main.home-shell:not(.admin-menu-shell) .home-head');
         nav.style.display=anasayfa?'none':'flex';
     }
