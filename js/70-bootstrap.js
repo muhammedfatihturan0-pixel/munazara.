@@ -1,8 +1,20 @@
 // --- BAŞLATMA ---
     window.addEventListener('online',()=>{networkDurumunuGuncelle();offlineKuyruguGonder();});
     window.addEventListener('offline',networkDurumunuGuncelle);
-    db.ref('.info/connected').on('value',s=>{firebaseBagli=s.val()===true;networkDurumunuGuncelle();if(firebaseBagli){offlineKuyruguGonder();void juriSureAuditKuyrugunuGonder();}});
-    setInterval(()=>{offlineKuyruguGonder();void juriSureAuditKuyrugunuGonder();},15000);
+    db.ref('.info/connected').on('value',s=>{
+        firebaseBagli=s.val()===true;
+        networkDurumunuGuncelle();
+        if(firebaseBagli){
+            offlineKuyruguGonder();
+            void juriSureAuditKuyrugunuGonder();
+            void juriCihazDurumunuGuncelle(true);
+        }
+    });
+    setInterval(()=>{
+        offlineKuyruguGonder();
+        void juriSureAuditKuyrugunuGonder();
+        void juriCihazDurumunuGuncelle();
+    },15000);
 
     window.onload=function(){
         const oturum=juriOturumuGetir();
