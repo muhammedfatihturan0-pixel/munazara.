@@ -1297,6 +1297,56 @@
             </main>`;
     }
 
+    async function juriPuanArsivGecmisiniYukle(){
+        if(!adminYetkiliMi())return;
+        const host=document.getElementById('juriPuanGecmisGovde');if(!host)return;
+        host.textContent='Firebase puan arşivleri okunuyor…';
+        try{
+            const cats=['ORTAOKUL','LİSE'];
+            const snaps=await Promise.all(cats.map(k=>db.ref('arsiv/juriPuanYedekleri/'+k).once('value')));
+            const rows=[],seen=new Set();
+            snaps.forEach((snap,ci)=>{
+                const kategori=cats[ci];
+                snap.forEach(macNode=>{
+                    macNode.forEach(kayitNode=>{
+                        const root=kayitNode.val()||{};
+                        const add=(record,source,key)=>{
+                            if(!record?.secim||!record?.puanlar)return;
+                            const fingerprint=[kategori,macNode.key,kayitNode.key,source,key||''].join('|');
+                            if(seen.has(fingerprint))return;
+                            seen.add(fingerprint);
+                            rows.push({kategori,macId:macNode.key,source,record});
+                        };
+                        if(root.sonDurum)add(root.sonDurum,'Güncel yedek','');
+                        if(root.reddedilen)add(root.reddedilen,'Süre/işlem nedeniyle arşivlenen','');
+                        if(root.bekleyen)add(root.bekleyen,'Süre doğrulaması bekliyor','');
+                        Object.entries(root.gecmis||{}).forEach(([key,record])=>add(record,'Geçmiş kaydı',key));
+                    });
+                });
+            });
+            rows.sort((a,b)=>{
+                const ta=Number(a.record.puanGondermeAniClientAt||a.record.puanGondermeAni||a.record.localUpdatedAt||a.record.yedekAt||a.record.createdAt||0);
+                const tb=Number(b.record.puanGondermeAniClientAt||b.record.puanGondermeAni||b.record.localUpdatedAt||b.record.yedekAt||b.record.createdAt||0);
+                return tb-ta;
+            });
+            if(!rows.length){host.textContent='Firebase arşivinde henüz jüri puanı bulunmuyor.';return;}
+            const html=rows.map(x=>{
+                const r=x.record,sec=r.secim||{},raw=r.puanlar||{};
+                const stamp=Number(r.puanGondermeAniClientAt||r.puanGondermeAni||r.localUpdatedAt||r.yedekAt||r.createdAt||0);
+                const date=stamp?new Date(stamp).toLocaleString('tr-TR'):'Tarih bilgisi yok';
+                const values=Array.from({length:13},(_,i)=>raw[i]??raw[String(i)]??'—');
+                const total=values.reduce((sum,value)=>sum+(Number.isFinite(Number(value))?Number(value):0),0);
+                const criteria=values.map((value,i)=>htmlEscape((i+1)+'. '+(krit[i]?.t||'Kriter '+(i+1))+': '+value)).join('<br>');
+                const state=r.reddedildi?'Resmî puana eklenmedi':(r.queueStatus||r.yedekOlayi||r.durum||'Arşiv kaydı');
+                return '<tr><td style="white-space:nowrap">'+htmlEscape(date)+'</td><td>'+htmlEscape(x.kategori)+'<br>'+htmlEscape(r.macEtiketi||r.mac||x.macId)+'</td><td>'+htmlEscape(sec.okul||'—')+'<br><b>'+htmlEscape(sec.ogr||'—')+'</b></td><td>'+htmlEscape(sec.juri||'—')+'<br>'+htmlEscape(sec.juriAd||'')+'</td><td>'+htmlEscape(x.source)+'<br>'+htmlEscape(state)+'</td><td style="text-align:left;min-width:320px">'+criteria+'<b style="display:block;margin-top:6px;color:#facc15">Toplam: '+total+'/100</b></td></tr>';
+            }).join('');
+            host.innerHTML='<div style="font-size:12px;color:#94a3b8;margin-bottom:8px">'+rows.length+' tarihsel kayıt bulundu.</div><div style="overflow:auto"><table class="tutanak-table" style="min-width:1250px"><thead><tr><th>Tarih</th><th>Kategori / maç</th><th>Okul / öğrenci</th><th>Jüri</th><th>Arşiv kaynağı / durum</th><th>13 kriter ve toplam</th></tr></thead><tbody>'+html+'</tbody></table></div>';
+        }catch(err){
+            host.className='puanlama-bilgi hata';
+            host.textContent='Geriye dönük jüri puan arşivi okunamadı: '+String(err?.message||err)+' · Firebase arşiv okuma yetkisini kontrol edin.';
+        }
+    }
+
     async function renderJuriSureLoglari(){
         if(!adminYetkiliMi())return sifreliModulKontrol('yonetici');
         dinleyicileriTemizle();
@@ -1306,10 +1356,15 @@
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
                 <button class="btn" style="width:auto;background:#1d4ed8" onclick="renderJuriSureLoglari()">↻ Günlüğü yenile</button>
                 <button class="btn" style="width:auto;background:#475569" onclick="renderYoneticiMenu()">← Yönetici menüsü</button>
+                <button class="btn" style="width:auto;background:#0f766e" onclick="juriPuanArsivGecmisiniYukle()">↻ Geriye dönük puan arşivini yenile</button>
             </div>
             <div id="juriSureLogGovde" class="puanlama-bilgi">İşlem kayıtları yükleniyor…</div>
+            <h3 style="margin-top:24px">Geriye Dönük Jüri Puan Kayıtları</h3>
+            <div class="puanlama-bilgi">Resmî puanlar, güncellenmiş kayıtların geçmiş kopyaları, süre nedeniyle resmî kayda alınmayan puanlar ve doğrulama bekleyen kayıtlar. Arşivdeki puanlar resmî puanı otomatik değiştirmez.</div>
+            <div id="juriPuanGecmisGovde" class="puanlama-bilgi">Puan arşivi yükleniyor…</div>
         </div>`;
         const host=document.getElementById('juriSureLogGovde');
+        void juriPuanArsivGecmisiniYukle();
         try{
             const cats=['ORTAOKUL','LİSE'];
             const snaps=await Promise.all(cats.map(k=>db.ref(`arsiv/juriSureOlaylari/${k}`).limitToLast(500).once('value')));
