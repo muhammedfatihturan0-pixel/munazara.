@@ -321,7 +321,7 @@
             return;
         }
         const oncekiOturum=juriOturumuGetir();
-        if(oncekiOturum)void juriCihazDurumunuOturumunuKapat(oncekiOturum,'juri_kilidi_degisti');
+        if(oncekiOturum)await juriCihazDurumunuOturumunuKapat(oncekiOturum,'juri_kilidi_degisti');
         const oturum = { juri, ad: temizAd, yedekMi:false, gunKey: baglam.gunKey, gunLabel: baglam.gunLabel,
             kategori: baglam.kategori, lockedAt: Date.now(), clientId: getClientId() };
         localStorage.setItem(JURI_OTURUM_KEY, JSON.stringify(oturum));
