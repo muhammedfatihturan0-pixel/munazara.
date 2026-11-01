@@ -556,8 +556,12 @@
         const count=document.getElementById('anaMenuKuyrukSayisi');if(count)count.textContent=String(pending.length);
     }
     let puanGuvenceModalSurum=0;
+    let turnuvaBaySecimResolver=null;
     function puanGuvenceModaliniKapat(){
         puanGuvenceModalSurum++;
+        if(typeof turnuvaBaySecimResolver==='function'){
+            const resolve=turnuvaBaySecimResolver;turnuvaBaySecimResolver=null;resolve(null);
+        }
         const el=document.getElementById('puanGuvenceModal');if(el)el.remove();
     }
     function puanGuvenceModaliniAc(baslik,icerik){
