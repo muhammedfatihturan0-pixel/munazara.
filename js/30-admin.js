@@ -309,7 +309,7 @@
                     <button id="liveViewAktif" class="btn" style="margin:0;padding:8px" onclick="yoneticiMacGorunumuSec('aktif')">Aktif Maçlar</button>
                     <button id="liveViewArsiv" class="btn" style="margin:0;padding:8px" onclick="yoneticiMacGorunumuSec('arsiv')">Arşiv</button>
                   </div>
-                  <div class="sure-hint">Aktif maçlar en yakın tarih ve saate göre sıralanır. Sonucu kesinleşen veya kapatılan maçlar otomatik arşive ayrılır; puan, süre ve sonuçlar silinmez.</div>
+                  <div class="sure-hint">Aktif maçlar en yakın tarih ve saate göre sıralanır. Sonucu kesinleşen veya kapatılan maçlar <b>Arşiv</b> sekmesine taşınır; puan, süre ve sonuçlar silinmez. <b>BAY</b> bir jüri karşılaşması değildir; bu listede maç olarak yer almaz, Fikstür Yönetimi'nde ayrı BAY satırı olarak görünür.</div>
                   <div id="liveMatches" style="overflow-x:auto;">Yükleniyor...</div></div>
                 <div id="sureModalHost" class="no-print"></div>
                 <button class="btn no-print" style="background:#0f766e" onclick="yoneticiManuelMacEkleEkraniAc()">＋ Yeni / Manuel Maç Kaydet</button>
