@@ -337,12 +337,12 @@
                     <button class="btn" style="width:auto;margin:0;background:#475569;" onclick="renderTurnuva()">← Fikstür Yönetimine Dön</button>
                 </div>
                 <div class="btn-grid" style="grid-template-columns:1fr 1fr;margin-bottom:20px;"><button class="btn kat-btn ${secimler.kategori==='ORTAOKUL'?'btn-active':''}" onclick="katSec(this,'ORTAOKUL','turnuva')">ORTAOKUL AĞACI</button><button class="btn kat-btn ${secimler.kategori==='LİSE'?'btn-active':''}" onclick="katSec(this,'LİSE','turnuva')">LİSE AĞACI</button></div>
-                <div style="margin-bottom:15px;font-size:14px;color:var(--text-muted);">Turnuva ağacı Firebase'de tutulur. Üst turlarda rakipler otomatik kura ile belirlenir; takım sayısı tekse daha önce BAY almamış okullardan biri otomatik BAY alır. Ortaokul ve lise aynı kuralla ilerler.</div>
+                <div style="margin-bottom:15px;font-size:14px;color:var(--text-muted);">Turnuva ağacı artık Firebase'de tutulur; aynı yönetici ekranı farklı cihazlarda aynı durumu görür. Değişiklikler transaction ile çakışmaya karşı korunur.</div>
                 <textarea id="takimlar" style="height:100px;" placeholder="Sistemde kayıtlı okul aranıyor..." readonly></textarea>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button class="btn" style="background:var(--primary);border:none;" onclick="ilkTuruKur()">🎲 Turnuvayı Başlat / Yeniden Kur</button><button class="btn" style="background:#ef4444;border:none;" onclick="turnuvayiSifirla()">Turnuvayı Sıfırla</button></div>
                 <div id="turnuvaRevision" style="font-size:11px;color:var(--text-muted);margin:8px 0;"></div>
                  <div id="fiksturKesinSonuclar" class="kriter-card"><b>Resmî Fikstürden Gelen Kesin Sonuçlar</b><div id="fiksturSonucSatirlari" style="margin-top:8px;">Henüz sonuç bulunmuyor.</div></div>
-                <div id="sampiyonAlani"></div><div id="aktif-tur-container"></div><button class="btn" id="nextTurBtn" style="display:none;background:var(--success);border:none;margin-top:25px;padding:16px;" onclick="yeniTur()">🎲 Otomatik Kura ile Üst Turu Kur</button><div id="gecmis-turlar"></div>
+                <div id="sampiyonAlani"></div><div id="aktif-tur-container"></div><button class="btn" id="nextTurBtn" style="display:none;background:var(--success);border:none;margin-top:25px;padding:16px;" onclick="yeniTur()">Kalanlarla Üst Turu Kur</button><div id="gecmis-turlar"></div>
                 <button class="btn" style="background:#475569" onclick="anaMenu()">← Ana Menü</button>
             </div>`;
         db.ref('okullar/'+secimler.kategori).once('value',s=>{const arr=[];s.forEach(o=>arr.push(o.key));const ta=document.getElementById('takimlar');if(ta)ta.value=arr.join('\n');});
@@ -456,31 +456,6 @@
         },undefined,false);
     }
 
-    // Üst tur kura düzeni: önce takımları karıştır, sonra daha önce BAY almamış
-    // okullardan birini tek sayılı turlarda otomatik BAY geçir.
-    function turnuvaKuraKaristir(takimlar){
-        const shuffled=(takimlar||[]).slice();
-        for(let i=shuffled.length-1;i>0;i--){
-            const j=Math.floor(Math.random()*(i+1));
-            [shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];
-        }
-        return shuffled;
-    }
-
-    function turnuvaBayTakiminiOtomatikSec(kategori,turNo,takimlar,oncekiBaylar=[]){
-        if(!Array.isArray(takimlar)||takimlar.length%2===0)return '';
-        const keyOf=x=>skorEslesmeAnahtari(x);
-        const used=new Set((oncekiBaylar||[]).filter(Boolean).map(keyOf));
-        const candidates=takimlar.filter(x=>x&&!used.has(keyOf(x)));
-        if(!candidates.length){
-            alert(kategori+' · '+turNo+'. tur için daha önce BAY almamış uygun okul bulunamadı. Turnuva ağacı değiştirilmedi.');
-            return null;
-        }
-        const selected=candidates[Math.floor(Math.random()*candidates.length)];
-        console.info('[Turnuva otomatik kura]',kategori,turNo+'. tur · BAY:',selected);
-        return selected;
-    }
-
     async function yeniTur(){
         const snapshot=await turnuvaRef().once('value');
         const original=snapshot.val();
@@ -514,11 +489,11 @@
                 if(match?.team2==='BYE'&&match.team1)previousBays.push(match.team1);
             }
         }
-        // Her turda rakipler yeniden karıştırılır. Takım sayısı tekse,
-        // önceki turlarda BAY almamış okullardan biri otomatik seçilir.
-        const kuraTakimlari=turnuvaKuraKaristir(winners);
-        const byeTeam=turnuvaBayTakiminiOtomatikSec(secimler.kategori,nextNo,kuraTakimlari,previousBays);
-        if(byeTeam===null)return;
+        let byeTeam='';
+        if(winners.length%2===1){
+            byeTeam=await turnuvaBaySecimiIste(secimler.kategori,nextNo,winners,previousBays);
+            if(!byeTeam)return;
+        }
         let olusanRound=null;
         const result=await turnuvaRef().transaction(state=>{
             if(!state||state.updatedAt!==original.updatedAt||Number(state.currentRound||1)!==currentRound)return;
@@ -529,9 +504,7 @@
             if(liveWinners.length!==winners.length||
                 liveWinners.some((name,i)=>skorEslesmeAnahtari(name)!==skorEslesmeAnahtari(winners[i])))return;
             if(byeTeam&&!liveWinners.some(x=>skorEslesmeAnahtari(x)===skorEslesmeAnahtari(byeTeam)))return;
-            olusanRound=roundOlustur(secimler.kategori,nextNo,kuraTakimlari,byeTeam);
-            olusanRound.kuraTuru='otomatik';
-            olusanRound.bayAtamasi=byeTeam?'otomatik':'yok';
+            olusanRound=roundOlustur(secimler.kategori,nextNo,liveWinners,byeTeam);
             state.rounds['r'+nextNo]=olusanRound;
             state.currentRound=nextNo;state.revision=(state.revision||0)+1;state.updatedAt=Date.now();
             return state;
