@@ -22,7 +22,7 @@
           <option value="replace">Maçtaki okulu değiştir</option>
           <option value="move">Karşılaşmayı boş gün / seansa taşı</option>
           <option value="add">#35 · Bekleyen rakibi belirle</option>
-          <option value="pair">#35 · Rakipsiz okulu 2. turda rakiple eşleştir</option>
+          <option value="pair" disabled>#35 · 2. tur rakibi otomatik belirlenecek</option>
         </select>
         <label class="puanlama-etiket">Kategori</label>
         <select id="fIstKategori" onchange="fiksturIstisnaFormunuGuncelle()"><option value="LİSE">LİSE</option><option value="ORTAOKUL">ORTAOKUL</option></select>
