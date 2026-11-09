@@ -1,5 +1,5 @@
 
-    const APP_VERSION = '3.45 · Süresiz Puan ve Maç Bazlı Kadro';
+    const APP_VERSION = '3.46 · Süresiz Puan ve Sabit Maç Kadrosu';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
