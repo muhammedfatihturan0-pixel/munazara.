@@ -1,5 +1,5 @@
 
-    const APP_VERSION = '3.41 · Merkezi Jüri Canlı Takibi';
+    const APP_VERSION = '3.42 · Lise Değerlendirme Başlatma Onayı';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -575,6 +575,7 @@
         return puanBildirimGecmisiOku().filter(x=>Number(x.updatedAt||0)>readAt).length;
     }
     function bildirimMerkeziniAc(){
+        if(typeof adminYetkiliMi!=='function'||!adminYetkiliMi())return;
         const q=offlineKuyrukGetir();
         const pending=Object.entries(q).filter(([,x])=>x&&x.kayit);
         const durum=puanFirebaseAnlikDurum||puanFirebaseDurumuOku();
@@ -1071,7 +1072,7 @@
                 </header>
                 <div class="home-grid">
                     <button class="home-link primary" onclick="renderPuanlamaSecim()">
-                        <span><span class="home-card-title">📝 Jüri Modülü</span><span class="home-card-desc">Jüri kimliğinizi seçin, öğrencileri belirleyin ve 13 değerlendirme kriterini doğrudan puanlayın. Şifre gerekmez. Öğrenci seçilip “Kriterleri Puanla” açılınca ortak 6 dakikalık sayaç başlar; 5. dakikada uyarı verir. Son 1 dakika tüm açık jüri puanlama ekranlarında uyarılır. Bir jürinin puan göndermesi diğer jürilerin ortak süresini bitirmez; 6 dakika sonunda yalnızca 1 dakika ek gönderim penceresi kalır. Gerekirse ortak süre isteğe bağlı sıfırlanabilir; işlem günlüğe kaydedilir.</span></span>
+                        <span><span class="home-card-title">📝 Jüri Modülü</span><span class="home-card-desc">Jüri kimliğinizi seçin, öğrencileri belirleyin ve 13 değerlendirme kriterini doğrudan puanlayın. Şifre gerekmez. Ortaokulda “Kriterleri Puanla” açılınca; lisede jüri ekranındaki “Değerlendirmeyi Başlat” düğmesine ilk jüri bastığında ortak 6 dakikalık sayaç başlar. 5. dakikada uyarı verir. Son 1 dakika tüm açık jüri puanlama ekranlarında uyarılır. Bir jürinin puan göndermesi diğer jürilerin ortak süresini bitirmez; 6 dakika sonunda yalnızca 1 dakika ek gönderim penceresi kalır. Gerekirse ortak süre isteğe bağlı sıfırlanabilir; işlem günlüğe kaydedilir.</span></span>
                         <span class="home-arrow">→</span>
                     </button>
                     <button class="home-link" onclick="sifreliModulKontrol('yonetici')">
