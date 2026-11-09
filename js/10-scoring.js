@@ -796,21 +796,10 @@
         const bitis=Number(veri.bitisAt||0);
         return !bitis || bitis < bas + ORTAK_SURE_LIMIT*1000;
     }
-    function ortakPuanSonAt(veri){
-        const bas=Number(veri?.baslangicAt||0);
-        if(!bas)return 0;
-        // Bir jüri "Konuşma bitti" dese bile ortak puanlama penceresi kısaltılmaz.
-        // Her jüri, aynı başlangıçtan itibaren 6 dakika + 1 dakikaye kadar gönderebilir.
-        return bas+(ORTAK_SURE_LIMIT+ORTAK_PUAN_EK_SURE)*1000;
-    }
-    function ortakPuanPenceresiAcik(veri,kontrolAni=ortakSureSimdi()){
-        const son=ortakPuanSonAt(veri);
-        return !!son && Number(kontrolAni)<=son;
-    }
-    function ortakPuanPenceresiKapandi(veri,kontrolAni=ortakSureSimdi()){
-        const son=ortakPuanSonAt(veri);
-        return !!son && Number(kontrolAni)>son;
-    }
+    // Konuşma süresi puan gönderme süresi değildir. Maç açık kaldığı sürece puan girişi açıktır.
+    function ortakPuanSonAt(){return Number.POSITIVE_INFINITY;}
+    function ortakPuanPenceresiAcik(){return true;}
+    function ortakPuanPenceresiKapandi(){return false;}
     function juriSureDenetimTemeli(extra={}){
         const ot=juriOturumuGetir();
         const mac=puanlamaMaclar.get(secimler.macId)||mevcutMacBilgisi()||{};
