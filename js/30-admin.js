@@ -303,7 +303,7 @@
                 <div id="liveMetrics" class="admin-summary-grid"></div>
                 <div id="puanAktarimSorunlari" class="kriter-card" style="margin:0 0 14px;"></div>
                 <div class="kriter-card"><h3 style="margin-top:0;color:var(--text-main);">Maçlar · Canlı Puanlar ve 3/3 Jüri Durumu</h3>
-                  <div class="sure-hint"><b>Tek ana işlem: Sonucu Kesinleştir.</b> Üç jüri ve öğrenci kadrosu tam olduğunda puanlardan resmî galibi hesaplar, maçı kapatır ve jüri ekranlarına sonucu bir kez duyurur. Eşitlikte tamamlanmış konuşma süreleri kullanılır. Kadro doğrulanmadıysa manuel denetim açılır. <b>Geriye dönük süre düzeltmesi galibi değiştirmez.</b> Hükmen, iptal ve yönetici kararı istisnai/gelişmiş işlemlerdedir.</div>
+                  <div class="sure-hint"><b>Ön sonuç otomatik açıklanır.</b> Üç jüri ve öğrenci kadrosu tamamlandığında galip ve puanlar jüri ekranlarında görünür; bu aşamada maç kapanmaz ve fikstüre işlenmez. Sen daha sonra <b>Sonucu Kesinleştir</b> diyerek resmî sonucu kaydedersin. Eşitlikte konuşma süresi/son savunma kuralları uygulanır. <b>Geriye dönük süre düzeltmesi galibi değiştirmez.</b> İstisnai işlemler gelişmiş menüdedir.</div>
                    <div class="live-filter-bar no-print"><input id="liveMatchSearch" placeholder="Maç numarası veya okul ara..." oninput="yoneticiTabloFiltresiniGuncelle()" aria-label="Maç ara"><label><input id="iptalGoster" type="checkbox" style="width:auto;margin:0 5px 0 0;" onchange="yoneticiTabloFiltresiniGuncelle()">İptal edilenleri göster</label></div>
                   <div class="btn-grid no-print" style="grid-template-columns:1fr 1fr;gap:7px;margin:8px 0;">
                     <button id="liveViewAktif" class="btn" style="margin:0;padding:8px" onclick="yoneticiMacGorunumuSec('aktif')">Aktif Maçlar</button>
@@ -1055,14 +1055,16 @@
                     :null));
             const hamPuan=kayitliJuriPuanlariniTopla(skorlar,id,m);
             const resmiSonuc=canliResmiMacSonucu(m.fiksturNo||m.sonuc?.macNo,secimler.kategori);
+            const geciciSonuc=macGeciciSonucDurumunuHesapla(secimler.kategori,id,m,g,yoneticiResmiFiksturDurumu,m.fiksturNo||m.sonuc?.macNo);
             let durumText='Jüri eksik';
             if(m.durum==='iptal')durumText='İptal edildi · fikstür kaydı korunur';
             else if(m.durum==='kapali'&&m.sonuc?.yontem==='cift_eleme')durumText='⛔ İKİ OKUL ELENDİ · Galip yok · Üst tur düzenlenmeli';
             else if(m.sonuc?.kazanan&&m.durum==='kapali')durumText=`${m.sonuc.yoneticiIstisnasi?'YÖNETİCİ ONAYLI · ':m.sonuc.yontem==='hukmen'?'HÜKMEN · ':''}Galip: ${m.sonuc.kazanan}`;
             else if(resmiSonuc && m.durum!=='iptal')durumText=`✅ FİKSTÜRDE KESİNLEŞTİ · ${resmiSonuc.kazanan?'Galip: '+resmiSonuc.kazanan:'Galip yok'} · Arşivde`;
             else if(m.isPending || [m.hukOkul,m.muhOkul].some(n=>fiksturIstisnaNorm(n)==='boş'))durumText='⏳ RAKİP BEKLENİYOR · Maç ayrıldı, galip yok';
-            else if(g.ready)durumText=huk!==muh?'Puanla galip belirlenebilir':(sure?.hukSaniye>0&&sure?.muhSaniye>0?(sure.hukSaniye!==sure.muhSaniye?'Süre üstünlüğü hazır':'Son savunma gerekli'):'BERABERLİK — süre girin');
-            rows.push({id,m,...g,huk,muh,hamPuan,resmiSonuc,durumText});
+            else if(g.ready&&geciciSonuc.ready)durumText=`🟡 AÇIKLANABİLİR SONUÇ · Galip: ${geciciSonuc.kazanan}`;
+            else if(g.ready)durumText=`Puanlar tamam · ${geciciSonuc.mesaj}`;
+            rows.push({id,m,...g,huk,muh,hamPuan,resmiSonuc,geciciSonuc,durumText});
         });
         rows.sort((a,b)=>Number(a.m.fiksturNo||99999)-Number(b.m.fiksturNo||99999)||(a.m.etiket||'').localeCompare(b.m.etiket||'','tr'));
         yoneticiSonPanelMacSatirlari=rows;
@@ -1107,7 +1109,7 @@
                 actions+=but('✏ Rakibi Belirle',`renderFiksturIstisnaYonetimi()`,'#0f766e');
             } else if(iptal) actions+=but('↩ İptali Kaldır',`macIptaliniDegistir(${f},false)`,'#0f766e');
             else {
-                if(!kap&&!r.resmiSonuc)actions+=but('✓ Sonucu Kesinleştir',`macDurumuDegistir(${f},'kapali')`,'#0f766e');
+                if(!kap&&!r.resmiSonuc)actions+=but('✓ Sonucu Kesinleştir',`macDurumuDegistir(${f},'kapali')`,'#0f766e',!r.geciciSonuc?.ready);
                 let istisnalar='';
                 if(!kap&&r.resmiSonuc){istisnalar+=but('✏ Resmî Galibi Düzelt',`yoneticiResmiGalibiDuzelt(${f})`,'#7c3aed');istisnalar+='<div class="sure-hint">Yalnız bu maçın galibi değiştirilir; diğer eşleşmelere dokunulmaz.</div>'; }
                 if(kap&&r.m.sonuc?.senkronDurum!=='tamam'){istisnalar+=but('☁ Fikstür Senkronunu Onar',`macEsitlemeyiTekrarDene(${f})`,'#a16207');}
@@ -1570,41 +1572,42 @@
         }
         return adet===6;
     }
-    async function macSonucunuHesapla(kategori,macId,m,fixture) {
-        const [pSnap,oSnap,fSnap]=await Promise.all([
-            db.ref('puanlar/'+kategori).once('value'),
-            db.ref('okullar/'+kategori).once('value'),
-            db.ref('fikstur/tekSalon_2026_2027').once('value')
-        ]);
-        const okullar={};oSnap.forEach(c=>{okullar[c.key]=[];c.forEach(x=>okullar[c.key].push(String(x.val())));});
-        const data=macTamamlamaOzeti(snapshotKayitlariniTekillestir(pSnap),macId,m,okullar);
-        if(!data.ready) throw new Error(`3/3 jüri ve öğrenci listesi tamamlanmadan maç kapatılamaz.\n${data.sorunlar.slice(0,6).join('\n')}${data.sorunlar.length>6?'\n...':''}`);
-        const huk=Number(data.toplamlar[m.hukOkul]||0),muh=Number(data.toplamlar[m.muhOkul]||0);
+
+    function macGeciciSonucDurumunuHesapla(kategori,macId,m,data,fiksturDurumu={},fixtureNo=0) {
+        const bekle=mesaj=>({ready:false,mesaj});
+        if(!data?.ready)return bekle('3/3 jüri ve öğrenci kayıtları henüz tamamlanmadı.');
+        const huk=Number(data.toplamlar?.[m.hukOkul]||0),muh=Number(data.toplamlar?.[m.muhOkul]||0);
         let kazanan='',yontem='puan';
         if(huk>muh)kazanan=m.hukOkul;
         else if(muh>huk)kazanan=m.muhOkul;
         else {
             const s=m.sureEsitlik||{};
-            if(s.kaynak==='otomatik'&&!otomatikKonusmaSureleriDogrulandiMi(m,s))
-                throw new Error('Otomatik süre kaydı gerçek konuşma bitişleriyle doğrulanamadı. 6 dakikanın dolması jüri puanlama penceresinin bitişidir. Yönetici → Süreleri Gör / Düzelt bölümünden gerçek konuşma sürelerini doğrulayıp kaydedin.');
-            if(skorEslesmeAnahtari(s.hukOkul)!==skorEslesmeAnahtari(m.hukOkul) || skorEslesmeAnahtari(s.muhOkul)!==skorEslesmeAnahtari(m.muhOkul) || !Number.isInteger(s.hukSaniye) || !Number.isInteger(s.muhSaniye) || s.hukSaniye<=0 || s.muhSaniye<=0)
-                throw new Error('Jüri puanları eşit. Önce iki takımın toplam konuşma süresini ⏱ Süreler modülünden Firebase’e kaydedin.');
+            if(s.kaynak==='otomatik'&&!otomatikKonusmaSureleriDogrulandiMi(m,s))return bekle('Puanlar eşit. Otomatik konuşma süreleri doğrulanmalı.');
+            if(skorEslesmeAnahtari(s.hukOkul)!==skorEslesmeAnahtari(m.hukOkul)||skorEslesmeAnahtari(s.muhOkul)!==skorEslesmeAnahtari(m.muhOkul)||!Number.isInteger(s.hukSaniye)||!Number.isInteger(s.muhSaniye)||s.hukSaniye<=0||s.muhSaniye<=0)return bekle('Puanlar eşit. Konuşma süreleri kaydedilince sonuç belirlenecek.');
             if(s.hukSaniye<s.muhSaniye){kazanan=m.hukOkul;yontem='sure';}
             else if(s.muhSaniye<s.hukSaniye){kazanan=m.muhOkul;yontem='sure';}
             else {
-                const f=fSnap.val();
-                const manuel=f?.winnerSources?.[fixture.no];
-                const manuelGalip=f?.winners?.[fixture.no];
-                if(manuel?.source!=='manuel' || ![m.hukOkul,m.muhOkul].some(n=>skorEslesmeAnahtari(n)===skorEslesmeAnahtari(manuelGalip)))
-                    throw new Error('Hem puan hem konuşma süreleri eşit. Son savunmanın ardından Turnuva Ağacı → Fikstür Yönetimi ekranında bu maçın galibini manuel seçin; ardından Maçı Kapat işlemini tekrarlayın.');
-                kazanan=[m.hukOkul,m.muhOkul].find(n=>skorEslesmeAnahtari(n)===skorEslesmeAnahtari(manuelGalip));
-                yontem='son_savunma';
+                const no=Number(fixtureNo||m.fiksturNo||m.sonuc?.macNo||0);
+                const manuel=fiksturDurumu?.winnerSources?.[no],manuelGalip=fiksturDurumu?.winners?.[no];
+                if(!no||manuel?.source!=='manuel'||![m.hukOkul,m.muhOkul].some(n=>skorEslesmeAnahtari(n)===skorEslesmeAnahtari(manuelGalip)))return bekle('Puan ve süreler eşit. Son savunma galibi yönetici tarafından fikstürde seçilince sonuç açıklanabilir.');
+                kazanan=[m.hukOkul,m.muhOkul].find(n=>skorEslesmeAnahtari(n)===skorEslesmeAnahtari(manuelGalip));yontem='son_savunma';
             }
         }
-        const oncekiSecim=fSnap.val()?.winners?.[fixture.no];
-        if (oncekiSecim && skorEslesmeAnahtari(oncekiSecim)!==skorEslesmeAnahtari(kazanan))
-            throw new Error('Fikstürde daha önce ters yönde manuel galip seçilmiş. Önce Turnuva Ağacı ekranından bu seçimi temizleyin; yanlış galip otomatik ezilmeyecek.');
-        return {kazanan,yontem,puanHuk:huk,puanMuh:muh,maglup:kazanan===m.hukOkul?m.muhOkul:m.hukOkul,sureHuk:m.sureEsitlik?.hukSaniye ?? null,sureMuh:m.sureEsitlik?.muhSaniye ?? null,macNo:fixture.no,kategori,macId,createdAt:Date.now(),senkronDurum:'bekliyor'};
+        const no=Number(fixtureNo||m.fiksturNo||m.sonuc?.macNo||0),onceki=no?fiksturDurumu?.winners?.[no]:null;
+        if(onceki&&skorEslesmeAnahtari(onceki)!==skorEslesmeAnahtari(kazanan))return bekle('Fikstürde farklı bir galip seçilmiş. Yönetici kontrolü gerekiyor.');
+        return {ready:true,kazanan,yontem,puanHuk:huk,puanMuh:muh,maglup:skorEslesmeAnahtari(kazanan)===skorEslesmeAnahtari(m.hukOkul)?m.muhOkul:m.hukOkul,sureHuk:m.sureEsitlik?.hukSaniye??null,sureMuh:m.sureEsitlik?.muhSaniye??null,macNo:no||null,kategori,macId};
+    }
+
+    async function macSonucunuHesapla(kategori,macId,m,fixture) {
+        const [pSnap,oSnap,fSnap]=await Promise.all([
+            db.ref('puanlar/'+kategori).once('value'),db.ref('okullar/'+kategori).once('value'),db.ref('fikstur/tekSalon_2026_2027').once('value')
+        ]);
+        const okullar={};oSnap.forEach(c=>{okullar[c.key]=[];c.forEach(x=>okullar[c.key].push(String(x.val())));});
+        const data=macTamamlamaOzeti(snapshotKayitlariniTekillestir(pSnap),macId,m,okullar);
+        if(!data.ready)throw new Error('3/3 jüri ve öğrenci listesi tamamlanmadan maç kapatılamaz. '+data.sorunlar.slice(0,6).join(' · '));
+        const sonuc=macGeciciSonucDurumunuHesapla(kategori,macId,m,data,fSnap.val()||{},fixture?.no);
+        if(!sonuc.ready)throw new Error(sonuc.mesaj);
+        return {...sonuc,createdAt:Date.now(),senkronDurum:'bekliyor'};
     }
 
     async function fiksturSonucunuEsitle(kategori,macId,m,sonuc,fixture) {
