@@ -642,8 +642,8 @@
         const list={huk:new Map(),muh:new Map()};
         for(const v of Object.values(m?.konusmaSayaclari||{})){
             if(!v?.ogrenci)continue;
-            // Six minutes ending is the jury scoring-window timeout, not confirmed speech duration.
-            if(!['konusma_bitti','sure_doldu'].includes(v.bitisNedeni))continue;
+            // 6 dakika dolması puanlama penceresini değil konuşma zamanını bitirir; konuşma süresi yalnız açık bitirişle doğrulanır.
+            if(v.bitisNedeni!=='konusma_bitti')continue;
             const s=ortakSureKalan(v);
             if(!s?.bitti)continue;
             let taraf=v.taraf==='HÜKÜMET'?'huk':v.taraf==='MUHALEFET'?'muh':'';
@@ -661,7 +661,8 @@
             ogrenciler[taraf]=[...list[taraf].values()].map(x=>({ad:x.ad,saniye:x.saniye}));
             toplam[taraf]=ogrenciler[taraf].reduce((n,x)=>n+x.saniye,0);
         }
-        return {ogrenciler,toplam,sayi:ogrenciler.huk.length+ogrenciler.muh.length};
+        const tamamlandi=ogrenciler.huk.length===3&&ogrenciler.muh.length===3&&toplam.huk>0&&toplam.muh>0;
+        return {ogrenciler,toplam,sayi:ogrenciler.huk.length+ogrenciler.muh.length,tamamlandi};
     }
     // Bu işlem ayrı jüri puanlarına ve resmî maç sonucuna dokunmaz.
     // Kullanıcı tarafından girilmiş süreyi otomatik veriyle ASLA ezmez.
@@ -674,7 +675,7 @@
             const result=await db.ref(`maclar/${kategori}/${macId}`).transaction(cur=>{
                 if(!cur)return;
                 const o=otomatikSureleriDerle(cur);
-                if(!o.sayi||cur.sureEsitlik?.kaynak==='manuel' ||
+                if(!o.tamamlandi||cur.sureEsitlik?.kaynak==='manuel' ||
                     (cur.sureEsitlik?.ogrenciler && cur.sureEsitlik?.kaynak!=='otomatik'))return;
                 const eski=cur.sureEsitlik||{};
                 const ayni=JSON.stringify(eski.ogrenciler||{})===JSON.stringify(o.ogrenciler)
