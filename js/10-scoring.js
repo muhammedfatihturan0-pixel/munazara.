@@ -742,7 +742,7 @@
     // süre modalında kontrol edilip kaydedildiğinde sureEsitlik'e aktarılır.
     const ORTAK_SURE_LIMIT=360;
     const ORTAK_SURE_UYARI=300;
-    const ORTAK_PUAN_EK_SURE=60; // Altı dakikalık ortak sürenin ardından bütün jüriler için ek gönderim penceresi.
+    const ORTAK_PUAN_EK_SURE=0; // Puan gönderimi için ek süre sınırı yoktur; maç açık kaldığı sürece gönderim serbesttir.
     function ortakSureYedekYolu(kategori,macId,timerId){
         return `arsiv/konusmaSureYedekleri/${kategori}/${macId}/${timerId}`;
     }
@@ -955,11 +955,11 @@ Devam edilsin mi?`)){
             const yeni=result.snapshot?.val()||null;
             if(yeni)await ortakSureYedeginiKaydet(secimler.kategori,mac.id,id,yeni,'sifirlama_sonrasi');
             const logBulutaYazildi=await auditGuncelle({durum:'uygulandi',sebep:sebep.trim(),uygulandi:true,sifirlamaKullanildi:true,
-                oncekiSayac:onceki,yeniSayac:yeni,sifirlamaAt:resetAni,
+                oncekiSayac:onceki,yeniSayac:yeni,sifirlamaAt:resetAni,puanGonderimiSureyeBagli:false,
                 resetSayisi:Number(yeni?.sifirlamaSayisi)||1});
             await juriSureOturumLogunuGuncelle({sifirlamaTalepEdildi:true,sifirlamaKullanildi:true,
                 sifirlamaDurumu:'uygulandi',sifirlamaAt:resetAni,sifirlamaSebebi:sebep.trim()});
-            alert('Ortak süre sıfırlandı. Bütün jüri cihazlarında aynı öğrenci için yeni 6:00 + en fazla 1 dakikalık puanlama penceresi başladı. Puanlar silinmedi. '+(logBulutaYazildi?'İşlem günlüğe kaydedildi.':'Sonuç yerel denetim kuyruğuna alındı; bağlantı gelince yönetici günlüğüne aktarılacak.'));
+            alert('Ortak 6:00 konuşma süresi sıfırlandı. Puan gönderimi süreye bağlı değildir; maç açık kaldığı sürece gönderilebilir. Puanlar silinmedi. '+(logBulutaYazildi?'İşlem günlüğe kaydedildi.':'Sonuç yerel denetim kuyruğuna alındı; bağlantı gelince yönetici günlüğüne aktarılacak.'));
         }catch(err){
             await auditGuncelle({durum:'basarisiz',hata:String(err?.message||err),uygulandi:false,sifirlamaKullanildi:false});
             await juriSureOturumLogunuGuncelle({sifirlamaTalepEdildi:true,sifirlamaKullanildi:false,
@@ -1292,8 +1292,8 @@ Devam edilsin mi?`)){
         void juriCihazDurumunuGuncelle();
         puanFirebaseDurumuGoster();
         ortakPuanArayuzunuGuncelle();
-        void juriSureOturumLogla('acildi',{izinVerilenEkSureSaniye:ORTAK_PUAN_EK_SURE,
-            surePenceresi:'6 dakika + en fazla 1 dakika',sifirlamaSecenegiSunuldu:true,
+        void juriSureOturumLogla('acildi',{izinVerilenEkSureSaniye:0,puanGonderimiSureyeBagli:false,
+            surePenceresi:'Konuşma süresi 6 dakika; puan gönderimi maç açık kaldığı sürece serbest',sifirlamaSecenegiSunuldu:true,
             sifirlamaTalepEdildi:false,sifirlamaKullanildi:false,sifirlamaDurumu:'kullanilmadi'});
         const list = document.getElementById('kriterListesi');
         db.ref(`maclar/${secimler.kategori}/${mac.id}`).once('value').then(snapshot=>{
