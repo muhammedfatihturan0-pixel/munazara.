@@ -633,6 +633,8 @@
         const list={huk:new Map(),muh:new Map()};
         for(const v of Object.values(m?.konusmaSayaclari||{})){
             if(!v?.ogrenci)continue;
+            // Six minutes ending is the jury scoring-window timeout, not confirmed speech duration.
+            if(v.bitisNedeni!=='konusma_bitti')continue;
             const s=ortakSureKalan(v);
             if(!s?.bitti)continue;
             let taraf=v.taraf==='HÜKÜMET'?'huk':v.taraf==='MUHALEFET'?'muh':'';
@@ -687,6 +689,7 @@
         const {kategori,macId,mac:m}=baglam;
             const saltOkunur=m.durum==='kapali' && !adminYetkiliMi(); // Kapalı maçı yalnız yönetici düzeltebilir.
             aktifSureModal={kategori,macId,mac:m,ogrenciler,kaynaklar,
+                okullar:baglam.okullar||{},puandan:baglam.puandan||{huk:[],muh:[]},
                 oncekiGuncelleme:m.sureEsitlik?.updatedAt||0};
             const host=document.getElementById('sureModalHost');
             if(!host)return;
@@ -700,7 +703,10 @@
                                 skorEslesmeAnahtari(x?.ogrenci)===skorEslesmeAnahtari(ad) &&
                                 (x.taraf===(taraf==='huk'?'HÜKÜMET':'MUHALEFET') || skorEslesmeAnahtari(x.okul)===skorEslesmeAnahtari(okul)));
                         const otomatikSure=ortakSureKalan(otomatik);
-                        const value=v&&Number.isInteger(v.saniye)?v.saniye:(otomatikSure?.bitti?otomatikSure.gecen:0);
+                        const acikcaBitirildi=otomatik?.bitisNedeni==='konusma_bitti';
+                        const otomatikKayitGecerli=m.sureEsitlik?.kaynak!=='otomatik'||acikcaBitirildi;
+                        const value=v&&Number.isInteger(v.saniye)&&otomatikKayitGecerli
+                            ?v.saniye:(acikcaBitirildi&&otomatikSure?.bitti?otomatikSure.gecen:0);
                         const id=taraf+'_'+i;
                         return `<div class="sure-student-row"><span class="sure-student-name">${i+1}. ${htmlEscape(ad)}</span>
                             <input id="sureTakim${id}" value="${sureyiMetneDonustur(value)}" inputmode="numeric" aria-label="${htmlEscape(ad)} konuşma süresi" oninput="sureTakimToplamlariniGuncelle()" ${saltOkunur?'disabled':''}>
@@ -712,9 +718,12 @@
                 <h2>⏱ Öğrenci Bazlı Konuşma Süreleri</h2>
                 ${kaynaklar.huk!==m.hukOkul||kaynaklar.muh!==m.muhOkul?`<div class="puanlama-bilgi">Öğrenci listesi kaynakları: ${htmlEscape(m.hukOkul)} → ${htmlEscape(kaynaklar.huk==='__PUAN__'?'Kaydedilmiş jüri puanları':kaynaklar.huk)} · ${htmlEscape(m.muhOkul)} → ${htmlEscape(kaynaklar.muh==='__PUAN__'?'Kaydedilmiş jüri puanları':kaynaklar.muh)}. <b>Bu süre kaydı puanları veya fikstürü değiştirmez.</b></div>`:''}
                 ${m.durum==='kapali'?`<div class="puanlama-bilgi">Bu maç kesinleşmiş: ${saltOkunur?'Jüri cihazında yalnız görüntülenir. Geriye dönük düzeltme için Yönetici Modülüne girin.':'süreler geriye dönük tutanak için eklenebilir/düzeltilebilir.'} <b>Galip, puanlar ve resmî fikstür değişmez.</b> Düzeltmeler ayrıca arşivlenir.</div>`:''}
-                <p class="sure-hint">Tamamlanan ortak sayaçlar öğrenci bazında otomatik kaydedilir ve iki takım toplamı hesaplanır. Bu pencere <b>eksik/eski süreleri düzeltmek</b> içindir. Kaydet düğmesi manuel onay/düzeltme yapar. Konuşmayan öğrenci 00:00 kalabilir; her okulun toplamı sıfırdan büyük olmalıdır.</p>
+                <p class="sure-hint">Yalnızca jüri <b>“Konuşma bitti — süreyi kaydet”</b> düğmesiyle açıkça tamamladığı sayaçlar otomatik konuşma süresine aktarılır. 6 dakikanın kendiliğinden dolması puanlama penceresinin bitişidir; gerçek konuşma süresi olarak kabul edilmez. Bu pencere <b>eksik/eski süreleri düzeltmek</b> içindir. Konuşmayan öğrenci 00:00 kalabilir; her okulun toplamı sıfırdan büyük olmalıdır.</p>
                 <div class="sure-student-grid">${panel('huk',m.hukOkul)}${panel('muh',m.muhOkul)}</div>
                 <p class="sure-hint">Puan eşitliğinde, toplam konuşma süresi daha kısa olan okul galip sayılır. Süreler yeniden kaydedilirse tüm öğrenci kayıtları bir arada güncellenir.</p>
+                ${!saltOkunur&&adminYetkiliMi()&&kaynaklar.huk!=='__PUAN__'&&kaynaklar.muh!=='__PUAN__'&&
+                    (m.ogrenciKaynaklari?.huk!==kaynaklar.huk||m.ogrenciKaynaklari?.muh!==kaynaklar.muh)
+                    ?`<button class="btn" style="background:#0369a1" onclick="sureKadroEslesmesiniKaydet()">🔗 Yalnızca Öğrenci Listesi Eşleştirmesini Kaydet</button>`:''}
                 ${saltOkunur?'':`<button class="btn" style="background:var(--success)" onclick="sureFirebaseKaydet()">☁ Öğrenci Sürelerini Kaydet</button>`}
                 <button class="btn" onclick="sureModalKapat()">Kapat</button>
                 </div></div>`;
@@ -735,6 +744,39 @@
             sureModalKapat();
             sureKurtarmaBaslat({kategori,macId,mac:m,okullar,puandan});
         }catch(err){alert('Süre ekranı açılamadı: '+(err?.message||err));}
+    }
+    async function sureKadroEslesmesiniKaydet(){
+        const data=aktifSureModal;
+        if(!data||!navigator.onLine||!firebaseBagli)return alert('Öğrenci listesi eşleştirmesi için Firebase bağlantısı gereklidir.');
+        if(!adminYetkiliMi())return alert('Öğrenci listesi eşleştirmesini yalnızca yönetici kaydedebilir.');
+        const {kategori,macId,mac,kaynaklar,okullar,puandan}=data;
+        const yeni={huk:kaynaklar?.huk||'',muh:kaynaklar?.muh||''};
+        if(!yeni.huk||!yeni.muh||yeni.huk==='__PUAN__'||yeni.muh==='__PUAN__')return alert('Kalıcı eşleştirme için iki okulun da kayıtlı öğrenci listesi seçilmelidir. Yalnız puan kayıtlarından oluşturulan geçici liste kaynak olarak kaydedilemez.');
+        if(yeni.huk===yeni.muh)return alert('İki takım aynı öğrenci listesine bağlanamaz.');
+        for(const taraf of ['huk','muh']){
+            const liste=okullar?.[yeni[taraf]];
+            if(!Array.isArray(liste)||!liste.length)return alert('Seçilen okul kaynağı artık mevcut değil. Pencereyi kapatıp yeniden açın.');
+            const bulunan=new Set(liste.map(skorEslesmeAnahtari));
+            const eksik=(puandan?.[taraf]||[]).filter(ad=>!bulunan.has(skorEslesmeAnahtari(ad)));
+            if(eksik.length)return alert((taraf==='huk'?mac.hukOkul:mac.muhOkul)+' için seçilen liste jüri puanı bulunan öğrencilerin tamamını içermiyor: '+eksik.join(', '));
+            if(new Set(liste.map(skorEslesmeAnahtari)).size!==liste.length)return alert('Seçilen öğrenci listesinde mükerrer isim var. Eşleştirme kaydedilmedi.');
+        }
+        const onceki=mac.ogrenciKaynaklari||{};
+        if(onceki.huk===yeni.huk&&onceki.muh===yeni.muh)return alert('Bu iki öğrenci listesi eşleştirmesi maç kaydında zaten mevcut.');
+        if(!confirm('YALNIZCA ÖĞRENCİ LİSTESİ EŞLEŞTİRMESİ KAYDEDİLECEK\n\n'+mac.hukOkul+' → '+yeni.huk+'\n'+mac.muhOkul+' → '+yeni.muh+'\n\nJüri puanları, öğrenci süreleri, maç sonucu ve resmî fikstür değiştirilmeyecek. Devam edilsin mi?'))return;
+        try{
+            const ref=db.ref('maclar/'+kategori+'/'+macId);
+            const result=await ref.transaction(cur=>{
+                if(!cur||skorEslesmeAnahtari(cur.hukOkul)!==skorEslesmeAnahtari(mac.hukOkul)||skorEslesmeAnahtari(cur.muhOkul)!==skorEslesmeAnahtari(mac.muhOkul)||cur.durum!==mac.durum)return;
+                if(cur.durum==='kapali'&&JSON.stringify(cur.sonuc||{})!==JSON.stringify(mac.sonuc||{}))return;
+                const mevcut=cur.ogrenciKaynaklari||{};
+                if((mevcut.huk||'')!==(onceki.huk||'')||(mevcut.muh||'')!==(onceki.muh||''))return;
+                cur.ogrenciKaynaklari={...mevcut,huk:yeni.huk,muh:yeni.muh};cur.updatedAt=Date.now();return cur;
+            },undefined,false);
+            if(!result.committed)return alert('Maç kaydı işlem sırasında değişti. Hiçbir eşleştirme yazılmadı; pencereyi yeniden açıp kontrol edin.');
+            data.mac={...data.mac,ogrenciKaynaklari:{...(data.mac.ogrenciKaynaklari||{}),...yeni}};
+            alert('Öğrenci listesi eşleştirmesi kaydedildi. Yalnızca maçın kaynak eşleştirme alanı güncellendi; puanlar, süreler, galip ve fikstür değiştirilmedi. Şimdi sonuç kesinleştirmeyi yeniden deneyebilirsiniz.');
+        }catch(err){alert('Öğrenci listesi eşleştirmesi kaydedilemedi: '+(err?.message||err));}
     }
     async function sureFirebaseKaydet() {
         if(!aktifSureModal||!navigator.onLine||!firebaseBagli)return alert('Süre kaydı için Firebase bağlantısı gereklidir.');
@@ -1531,6 +1573,25 @@
         return found[0];
     }
 
+    function otomatikKonusmaSureleriDogrulandiMi(mac,sure){
+        const timers=Object.values(mac?.konusmaSayaclari||{});let adet=0;
+        for(const taraf of ['huk','muh']){
+            const records=sure?.ogrenciler?.[taraf]||[];
+            const okulKaynak=mac?.ogrenciKaynaklari?.[taraf]||(taraf==='huk'?mac?.hukOkul:mac?.muhOkul);
+            for(const record of records){
+                const ad=skorEslesmeAnahtari(record?.ad);
+                const matches=timers.filter(timer=>{
+                    if(!timer||timer.bitisNedeni!=='konusma_bitti'||skorEslesmeAnahtari(timer.ogrenci)!==ad)return false;
+                    const timerSide=timer.taraf==='HÜKÜMET'?'huk':timer.taraf==='MUHALEFET'?'muh':'';
+                    if(timerSide)return timerSide===taraf;
+                    return skorEslesmeAnahtari(timer.okul)===skorEslesmeAnahtari(okulKaynak);
+                });
+                if(matches.length!==1||!Number.isInteger(Number(matches[0].sureSaniye))||Number(matches[0].sureSaniye)!==Number(record.saniye))return false;
+                adet++;
+            }
+        }
+        return adet>0;
+    }
     async function macSonucunuHesapla(kategori,macId,m,fixture) {
         const [pSnap,oSnap,fSnap]=await Promise.all([
             db.ref('puanlar/'+kategori).once('value'),
@@ -1546,6 +1607,8 @@
         else if(muh>huk)kazanan=m.muhOkul;
         else {
             const s=m.sureEsitlik||{};
+            if(s.kaynak==='otomatik'&&!otomatikKonusmaSureleriDogrulandiMi(m,s))
+                throw new Error('Otomatik süre kaydı gerçek konuşma bitişleriyle doğrulanamadı. 6 dakikanın dolması jüri puanlama penceresinin bitişidir. Yönetici → Süreleri Gör / Düzelt bölümünden gerçek konuşma sürelerini doğrulayıp kaydedin.');
             if(skorEslesmeAnahtari(s.hukOkul)!==skorEslesmeAnahtari(m.hukOkul) || skorEslesmeAnahtari(s.muhOkul)!==skorEslesmeAnahtari(m.muhOkul) || !Number.isInteger(s.hukSaniye) || !Number.isInteger(s.muhSaniye) || s.hukSaniye<=0 || s.muhSaniye<=0)
                 throw new Error('Jüri puanları eşit. Önce iki takımın toplam konuşma süresini ⏱ Süreler modülünden Firebase’e kaydedin.');
             if(s.hukSaniye<s.muhSaniye){kazanan=m.hukOkul;yontem='sure';}
