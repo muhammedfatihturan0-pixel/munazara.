@@ -693,44 +693,52 @@
         return { id, hukOkul:huk, muhOkul:muh, etiket:macEtiketi(huk,muh) };
     }
 
+
     function canliJuriTakibiBaslat() {
         if (aktifJuriListenerRef) { aktifJuriListenerRef.off(); aktifJuriListenerRef = null; }
         if (aktifJuriMacListenerRef) { aktifJuriMacListenerRef.off(); aktifJuriMacListenerRef = null; }
-        const box = document.getElementById('canliJuriDurumu');
-        if (!box) return;
-        const mac = mevcutMacBilgisi();
-        if (!mac) { box.innerHTML = 'Canlı jüri durumu için iki okulu seçiniz.'; return; }
-        let sonKayitlar = [];
-        let sonMac = {durum:'acik'};
-        const render = () => {
-            const macKayitlari = sonKayitlar.filter(v => kayitMacId(v) === mac.id);
-            const gruplar = new Map();
-            macKayitlari.forEach(v => {
-                const k = ogrenciGrupKimligi(v);
-                if (!gruplar.has(k)) gruplar.set(k, new Set());
-                if (v.secim?.juri) gruplar.get(k).add(v.secim.juri);
-            });
-            const tam = [...gruplar.values()].filter(s=>BEKLENEN_JURILER.every(j=>s.has(j))).length;
-            let ogrHtml = '<span style="color:var(--text-muted);">Öğrenci seçilmedi.</span>';
-            if (secimler.ogr && secimler.okul) {
-                const ogrKisa = secimler.ogr.split(' (')[0];
-                const key = [mac.id, secimler.okul, ogrKisa].map(puanMetniNormalize).join('|');
-                const juriler = gruplar.get(key) || new Set();
-                const eksik = BEKLENEN_JURILER.filter(j=>!juriler.has(j));
-                ogrHtml = `<b>${htmlEscape(ogrKisa)}</b>: <span class="${eksik.length?'jury-missing':'jury-ok'}">${juriler.size}/3 jüri</span>${eksik.length?` · Eksik: ${htmlEscape(eksik.join(', '))}`:' · Tamamlandı'}`;
-                // Bir jüri puanlama formunda olmasa bile seçtiği öğrencinin ortak sayacı
-                // son 1 dakikaya girdiyse uyarıyı seçim ekranında da alır.
-                const timerId=ortakSureKimligi(secimler.okul,ogrKisa);
-                const timer=sonMac?.konusmaSayaclari?.[timerId];
+        const box=document.getElementById('canliJuriDurumu');if(!box)return;
+        const mac=mevcutMacBilgisi();if(!mac){box.innerHTML='Canlı jüri durumu için iki okulu seçiniz.';return;}
+        let sonKayitlar=[],sonMac={durum:'acik'},sonucHtml='',sonucSurumu=0;
+        const render=()=>{
+            const macKayitlari=sonKayitlar.filter(v=>kayitMacId(v)===mac.id),gruplar=new Map();
+            macKayitlari.forEach(v=>{const k=ogrenciGrupKimligi(v);if(!gruplar.has(k))gruplar.set(k,new Set());if(v.secim?.juri)gruplar.get(k).add(v.secim.juri);});
+            const tam=[...gruplar.values()].filter(s=>BEKLENEN_JURILER.every(j=>s.has(j))).length;
+            let ogrHtml='<span style="color:var(--text-muted);">Öğrenci seçilmedi.</span>';
+            if(secimler.ogr&&secimler.okul){
+                const ogrKisa=secimler.ogr.split(' (')[0],key=[mac.id,secimler.okul,ogrKisa].map(puanMetniNormalize).join('|');
+                const juriler=gruplar.get(key)||new Set(),eksik=BEKLENEN_JURILER.filter(j=>!juriler.has(j));
+                ogrHtml=`<b>${htmlEscape(ogrKisa)}</b>: <span class="${eksik.length?'jury-missing':'jury-ok'}">${juriler.size}/3 jüri</span>${eksik.length?` · Eksik: ${htmlEscape(eksik.join(', '))}`:' · Tamamlandı'}`;
+                const timerId=ortakSureKimligi(secimler.okul,ogrKisa),timer=sonMac?.konusmaSayaclari?.[timerId];
                 if(timer)ortakSureBirDakikaUyarisiKontrolEt(timer,secimler.kategori,mac.id,timerId);
             }
-            box.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><b>${htmlEscape(mac.etiket)}</b><span class="${sonMac.durum==='kapali'?'jury-missing':'jury-ok'}">${sonMac.durum==='kapali'?'MAÇ KAPALI':'MAÇ AÇIK'}</span></div><div style="margin-top:8px;">${ogrHtml}${secimler.ogr&&secimler.okul?secimEkraniOrtakSureMetni(sonMac,secimler.ogr,secimler.okul):''}</div><div style="margin-top:6px;font-size:12px;color:var(--text-muted);">Puan girilmiş öğrenci/maç: ${gruplar.size} · 3/3 tamamlanan: ${tam}</div>`;
+            box.innerHTML=`<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><b>${htmlEscape(mac.etiket)}</b><span class="${sonMac.durum==='kapali'?'jury-missing':'jury-ok'}">${sonMac.durum==='kapali'?'MAÇ KAPALI':'MAÇ AÇIK'}</span></div><div style="margin-top:8px;">${ogrHtml}${secimler.ogr&&secimler.okul?secimEkraniOrtakSureMetni(sonMac,secimler.ogr,secimler.okul):''}</div><div style="margin-top:6px;font-size:12px;color:var(--text-muted);">Puan girilmiş öğrenci/maç: ${gruplar.size} · 3/3 tamamlanan: ${tam}</div>${sonucHtml}`;
         };
-        aktifJuriListenerRef = db.ref('puanlar/' + secimler.kategori);
-        aktifJuriListenerRef.on('value', s => { sonKayitlar = snapshotKayitlariniTekillestir(s); render(); });
-        aktifJuriMacListenerRef = db.ref(`maclar/${secimler.kategori}/${mac.id}`);
-        aktifJuriMacListenerRef.on('value', s => { sonMac = s.val() || {durum:'acik'}; render(); });
-        // Seçim ekranındaki son-dakika uyarısı da Firebase sunucu saatiyle hesaplanır.
+        const sonucuHesapla=async()=>{
+            const seq=++sonucSurumu,meta=puanlamaMaclar.get(mac.id)||{};
+            const m={...meta,...sonMac,id:mac.id,kategori:secimler.kategori,hukOkul:sonMac.hukOkul||meta.hukOkul||mac.hukOkul,muhOkul:sonMac.muhOkul||meta.muhOkul||mac.muhOkul,fiksturNo:sonMac.fiksturNo||meta.fiksturNo||null};
+            if(m.durum==='kapali'&&m.sonuc?.kazanan){
+                sonucHtml=`<div style="margin-top:12px;padding:12px;border:1px solid #16a34a;border-radius:10px;background:rgba(20,83,45,.22);"><b>✅ RESMÎ SONUÇ</b><div style="font-size:18px;font-weight:800;margin-top:5px;">Galip: ${htmlEscape(m.sonuc.kazanan)}</div><small>Bu maçın sonucu yönetici tarafından kesinleştirildi.</small></div>`;render();return;
+            }
+            if(!m.hukOkul||!m.muhOkul||m.durum!=='acik'){sonucHtml='';render();return;}
+            let data;try{data=macTamamlamaOzeti(sonKayitlar,mac.id,m,puanlamaKayitliOkullar);}catch(_){sonucHtml='';render();return;}
+            if(!data?.ready){sonucHtml='';render();return;}
+            let fikstur={};try{fikstur=(await db.ref('fikstur/tekSalon_2026_2027').once('value')).val()||{};}catch(_){
+                if(seq!==sonucSurumu)return;sonucHtml='<div style="margin-top:10px;color:#fbbf24;font-size:12px;">Puanlar tamamlandı; fikstür doğrulaması okunamadı.</div>';render();return;
+            }
+            if(seq!==sonucSurumu)return;
+            const sonuc=macGeciciSonucDurumunuHesapla(secimler.kategori,mac.id,m,data,fikstur,m.fiksturNo);
+            if(sonuc.ready){
+                sonucHtml=`<div style="margin-top:12px;padding:14px;border:1px solid #d97706;border-radius:12px;background:rgba(120,53,15,.22);" aria-live="polite"><div style="font-size:11px;font-weight:850;letter-spacing:.08em;color:#fbbf24;">🟡 ÖN SONUÇ · AÇIKLANABİLİR</div><div style="font-size:19px;font-weight:850;margin-top:5px;">Galip: ${htmlEscape(sonuc.kazanan)}</div><div style="margin-top:4px;">${htmlEscape(m.hukOkul)}: <b>${sonuc.puanHuk}</b> puan · ${htmlEscape(m.muhOkul)}: <b>${sonuc.puanMuh}</b> puan</div><div style="font-size:12px;margin-top:4px;">Yöntem: ${sonuc.yontem==='puan'?'Jüri puanı':sonuc.yontem==='sure'?'Toplam konuşma süresi':'Son savunma'}</div><div style="font-size:11px;color:#fde68a;margin-top:7px;">Jüriler bu sonucu açıklayabilir. Bu henüz resmî sonuç değildir; maçın kapanması ve fikstüre işlenmesi yönetici kesinleştirmesinden sonra gerçekleşir.</div></div>`;
+            }else{
+                sonucHtml=`<div style="margin-top:10px;padding:10px;border:1px solid #a16207;border-radius:10px;color:#fde68a;font-size:12px;">Puanlar tamamlandı. Sonuç henüz açıklanabilir değil: ${htmlEscape(sonuc.mesaj)}</div>`;
+            }
+            render();
+        };
+        aktifJuriListenerRef=db.ref('puanlar/'+secimler.kategori);
+        aktifJuriListenerRef.on('value',s=>{sonKayitlar=snapshotKayitlariniTekillestir(s);render();void sonucuHesapla();});
+        aktifJuriMacListenerRef=db.ref(`maclar/${secimler.kategori}/${mac.id}`);
+        aktifJuriMacListenerRef.on('value',s=>{sonMac=s.val()||{durum:'acik'};render();void sonucuHesapla();});
         void ortakSureSaatiSenkronizeEt();
         if(aktifSecimSureTick)clearInterval(aktifSecimSureTick);
         aktifSecimSureTick=setInterval(()=>{if(document.getElementById('canliJuriDurumu'))render();},1000);
