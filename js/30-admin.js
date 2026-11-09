@@ -1108,10 +1108,12 @@
                [m.hukOkul,m.muhOkul].some(x=>['boş','bay'].includes(fiksturIstisnaNorm(x))))return;
             const g=macTamamlamaOzeti(skorlar,id,m,okullar);
             const huk=Number(g.toplamlar[m.hukOkul]||0),muh=Number(g.toplamlar[m.muhOkul]||0);
-            const sure=m.sureEsitlik||(()=>{
-                const o=otomatikSureleriDerle(m);
-                return o.sayi?{hukSaniye:o.toplam.huk,muhSaniye:o.toplam.muh,ogrenciler:o.ogrenciler,kaynak:'otomatik'}:null;
-            })();
+            const otomatikSure=otomatikSureleriDerle(m);
+            const sure=m.sureEsitlik?.kaynak==='otomatik'
+                ?(otomatikSure.tamamlandi?m.sureEsitlik:null)
+                :(m.sureEsitlik||(otomatikSure.tamamlandi
+                    ?{hukSaniye:otomatikSure.toplam.huk,muhSaniye:otomatikSure.toplam.muh,ogrenciler:otomatikSure.ogrenciler,kaynak:'otomatik'}
+                    :null));
             const hamPuan=kayitliJuriPuanlariniTopla(skorlar,id,m);
             const resmiSonuc=canliResmiMacSonucu(m.fiksturNo||m.sonuc?.macNo,secimler.kategori);
             let durumText='Jüri eksik';
@@ -1147,10 +1149,12 @@
         const but=(text,cb,bg,disabled=false)=>`<button class="btn" style="padding:7px;margin:3px 0;background:${bg}" ${disabled?'disabled':''} onclick="${cb}">${text}</button>`;
         let html='<table class="tutanak-table"><tr><th>Maç</th><th>Durum</th><th>3/3 Tam</th><th>Kayıtlı Puan (H / M)</th><th>Süre (H / M)</th><th>Sonuç</th><th>Yönetici İşlemleri</th></tr>';
         bulunan.forEach(r=>{
-            const kap=r.m.durum==='kapali',iptal=r.m.durum==='iptal',sure=r.m.sureEsitlik||(()=>{
-                const o=otomatikSureleriDerle(r.m);
-                return o.sayi?{hukSaniye:o.toplam.huk,muhSaniye:o.toplam.muh,kaynak:'otomatik'}:null;
-            })();
+            const kap=r.m.durum==='kapali',iptal=r.m.durum==='iptal',otomatikSure=otomatikSureleriDerle(r.m),sure=
+                r.m.sureEsitlik?.kaynak==='otomatik'
+                    ?(otomatikSure.tamamlandi?r.m.sureEsitlik:null)
+                    :(r.m.sureEsitlik||(otomatikSure.tamamlandi
+                        ?{hukSaniye:otomatikSure.toplam.huk,muhSaniye:otomatikSure.toplam.muh,kaynak:'otomatik'}
+                        :null));
             const state=r.resmiSonuc && !kap && !iptal?'Fikstür kesinleşmiş · otomatik arşivde':
                 r.m.sonuc?.senkronDurum==='tamam'?'Eşitlendi':(kap&&r.m.sonuc?.senkronDurum==='fikstur_eslesme_gerekli'?'Fikstür eşleştirmesi gerekli':kap?'Senkron bekliyor':iptal?'İptal':'Açık');
             const tip=kap?'KAPALI':iptal?'İPTAL':r.resmiSonuc?'RESMÎ FİKSTÜR KESİN':'AÇIK';
@@ -1611,11 +1615,12 @@
         const timers=Object.values(mac?.konusmaSayaclari||{});let adet=0;
         for(const taraf of ['huk','muh']){
             const records=sure?.ogrenciler?.[taraf]||[];
+            if(records.length!==3)return false;
             const okulKaynak=mac?.ogrenciKaynaklari?.[taraf]||(taraf==='huk'?mac?.hukOkul:mac?.muhOkul);
             for(const record of records){
                 const ad=skorEslesmeAnahtari(record?.ad);
                 const matches=timers.filter(timer=>{
-                    if(!timer||!['konusma_bitti','sure_doldu'].includes(timer.bitisNedeni)||skorEslesmeAnahtari(timer.ogrenci)!==ad)return false;
+                    if(!timer||timer.bitisNedeni!=='konusma_bitti'||skorEslesmeAnahtari(timer.ogrenci)!==ad)return false;
                     const timerSide=timer.taraf==='HÜKÜMET'?'huk':timer.taraf==='MUHALEFET'?'muh':'';
                     if(timerSide)return timerSide===taraf;
                     return skorEslesmeAnahtari(timer.okul)===skorEslesmeAnahtari(okulKaynak);
@@ -1624,7 +1629,7 @@
                 adet++;
             }
         }
-        return adet>0;
+        return adet===6;
     }
     async function macSonucunuHesapla(kategori,macId,m,fixture) {
         const [pSnap,oSnap,fSnap]=await Promise.all([
