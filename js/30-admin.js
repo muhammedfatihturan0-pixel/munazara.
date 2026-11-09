@@ -699,13 +699,10 @@
     function sureSureFormuGoster(baglam,ogrenciler,kaynaklar){
         const {kategori,macId,mac:m}=baglam;
             const saltOkunur=m.durum==='kapali' && !adminYetkiliMi(); // Kapalı maçı yalnız yönetici düzeltebilir.
-            // Eski maçlarda okulun güncel ana listesi değişmiş olabilir. Süre tutanağı sadece o maçın
-            // sabitlenmiş veya puan kayıtlarından doğrulanmış üç katılımcısını göstermelidir.
+            // Bu maçta puanı bulunan öğrenciler esas alınır. Henüz puan yoksa okulun güncel listesi kullanılır.
             ogrenciler={
-                huk:Array.isArray(m.ogrenciKadroSnapshot?.huk)&&m.ogrenciKadroSnapshot.huk.length===3
-                    ?m.ogrenciKadroSnapshot.huk:(baglam.puandan?.huk?.length===3?baglam.puandan.huk:ogrenciler.huk),
-                muh:Array.isArray(m.ogrenciKadroSnapshot?.muh)&&m.ogrenciKadroSnapshot.muh.length===3
-                    ?m.ogrenciKadroSnapshot.muh:(baglam.puandan?.muh?.length===3?baglam.puandan.muh:ogrenciler.muh)
+                huk:baglam.puandan?.huk?.length===3?baglam.puandan.huk:ogrenciler.huk,
+                muh:baglam.puandan?.muh?.length===3?baglam.puandan.muh:ogrenciler.muh
             };
             aktifSureModal={kategori,macId,mac:m,ogrenciler,kaynaklar,
                 okullar:baglam.okullar||{},puandan:baglam.puandan||{huk:[],muh:[]},
@@ -740,10 +737,6 @@
                 <p class="sure-hint">Yalnızca jüri <b>“Konuşma bitti — süreyi kaydet”</b> düğmesiyle açıkça tamamladığı sayaçlar otomatik konuşma süresine aktarılır. 6 dakikanın kendiliğinden dolması puanlama penceresinin bitişidir; gerçek konuşma süresi olarak kabul edilmez. Bu pencere <b>eksik/eski süreleri düzeltmek</b> içindir. Konuşmayan öğrenci 00:00 kalabilir; her okulun toplamı sıfırdan büyük olmalıdır.</p>
                 <div class="sure-student-grid">${panel('huk',m.hukOkul)}${panel('muh',m.muhOkul)}</div>
                 <p class="sure-hint">Puan eşitliğinde, toplam konuşma süresi daha kısa olan okul galip sayılır. Süreler yeniden kaydedilirse tüm öğrenci kayıtları bir arada güncellenir.</p>
-                ${!saltOkunur&&adminYetkiliMi()&&kaynaklar.huk!=='__PUAN__'&&kaynaklar.muh!=='__PUAN__'&&
-                    (m.ogrenciKaynaklari?.huk!==kaynaklar.huk||m.ogrenciKaynaklari?.muh!==kaynaklar.muh||
-                     !Array.isArray(m.ogrenciKadroSnapshot?.huk)||!Array.isArray(m.ogrenciKadroSnapshot?.muh))
-                    ?`<button class="btn" style="background:#0369a1" onclick="sureKadroEslesmesiniKaydet()">🔗 Bu Maçın Öğrenci Kadrosunu Sabitle</button>`:''}
                 ${saltOkunur?'':`<button class="btn" style="background:var(--success)" onclick="sureFirebaseKaydet()">☁ Öğrenci Sürelerini Kaydet</button>`}
                 <button class="btn" onclick="sureModalKapat()">Kapat</button>
                 </div></div>`;
@@ -764,49 +757,6 @@
             sureModalKapat();
             sureKurtarmaBaslat({kategori,macId,mac:m,okullar,puandan});
         }catch(err){alert('Süre ekranı açılamadı: '+(err?.message||err));}
-    }
-    async function sureKadroEslesmesiniKaydet(){
-        const data=aktifSureModal;
-        if(!data||!navigator.onLine||!firebaseBagli)return alert('Öğrenci listesi eşleştirmesi için Firebase bağlantısı gereklidir.');
-        if(!adminYetkiliMi())return alert('Öğrenci listesi eşleştirmesini yalnızca yönetici kaydedebilir.');
-        const {kategori,macId,mac,kaynaklar,okullar,puandan}=data;
-        const yeni={huk:kaynaklar?.huk||'',muh:kaynaklar?.muh||''};
-        if(!yeni.huk||!yeni.muh||yeni.huk==='__PUAN__'||yeni.muh==='__PUAN__')return alert('Kalıcı eşleştirme için iki okulun da kayıtlı öğrenci listesi seçilmelidir.');
-        if(yeni.huk===yeni.muh)return alert('İki takım aynı öğrenci listesine bağlanamaz.');
-        const snapshot={huk:[],muh:[]};
-        for(const taraf of ['huk','muh']){
-            const liste=okullar?.[yeni[taraf]];
-            if(!Array.isArray(liste)||!liste.length)return alert('Seçilen okul kaynağı artık mevcut değil. Pencereyi kapatıp yeniden açın.');
-            const adlar=[...new Set((puandan?.[taraf]||[]).map(x=>String(x||'').trim()).filter(Boolean))];
-            if(adlar.length!==3)return alert((taraf==='huk'?mac.hukOkul:mac.muhOkul)+' için bu maçta puan kaydı bulunan 3 farklı öğrenci olmalı. Şu an: '+adlar.length+'.');
-            snapshot[taraf]=adlar;
-        }
-        const onceki=mac.ogrenciKaynaklari||{};
-        const oncekiSnapshot=mac.ogrenciKadroSnapshot||{};
-        const snapshotAyni=['huk','muh'].every(t=>JSON.stringify((oncekiSnapshot[t]||[]).map(skorEslesmeAnahtari))===JSON.stringify(snapshot[t].map(skorEslesmeAnahtari)));
-        if(onceki.huk===yeni.huk&&onceki.muh===yeni.muh&&snapshotAyni)return alert('Bu maçın okul eşleştirmesi ve öğrenci kadrosu zaten sabitlenmiş.');
-        if(!confirm('BU MAÇIN ÖĞRENCİ KADROSU SABİTLENECEK\n\n'+
-            mac.hukOkul+' → '+yeni.huk+'\n'+snapshot.huk.join(', ')+'\n\n'+
-            mac.muhOkul+' → '+yeni.muh+'\n'+snapshot.muh.join(', ')+'\n\n'+
-            'Bu üçer öğrenci yalnızca bu maçın sabit katılımcıları olarak saklanacak. Okulun genel öğrenci listesine daha sonra öğrenci eklenmesi veya liste güncellenmesi eski maçı etkilemeyecek. Jüri puanları, süreler, galip ve fikstür değiştirilmeyecek. Devam edilsin mi?'))return;
-        try{
-            const ref=db.ref('maclar/'+kategori+'/'+macId);
-            const result=await ref.transaction(cur=>{
-                if(!cur||skorEslesmeAnahtari(cur.hukOkul)!==skorEslesmeAnahtari(mac.hukOkul)||
-                    skorEslesmeAnahtari(cur.muhOkul)!==skorEslesmeAnahtari(mac.muhOkul)||cur.durum!==mac.durum)return;
-                if(cur.durum==='kapali'&&JSON.stringify(cur.sonuc||{})!==JSON.stringify(mac.sonuc||{}))return;
-                const mevcut=cur.ogrenciKaynaklari||{};
-                const mevcutSnapshot=cur.ogrenciKadroSnapshot||{};
-                if((mevcut.huk||'')!==(onceki.huk||'')||(mevcut.muh||'')!==(onceki.muh||''))return;
-                if(JSON.stringify(mevcutSnapshot)!==JSON.stringify(oncekiSnapshot))return;
-                cur.ogrenciKaynaklari={...mevcut,huk:yeni.huk,muh:yeni.muh};
-                cur.ogrenciKadroSnapshot={...mevcutSnapshot,huk:snapshot.huk,muh:snapshot.muh};
-                cur.updatedAt=Date.now();return cur;
-            },undefined,false);
-            if(!result.committed)return alert('Maç kaydı işlem sırasında değişti. Hiçbir eşleştirme yazılmadı; pencereyi yeniden açıp kontrol edin.');
-            data.mac={...data.mac,ogrenciKaynaklari:{...(data.mac.ogrenciKaynaklari||{}),...yeni},ogrenciKadroSnapshot:{...(data.mac.ogrenciKadroSnapshot||{}),huk:snapshot.huk,muh:snapshot.muh}};
-            alert('Bu maçın öğrenci kadrosu sabitlendi. Bundan sonra okulun genel listesine öğrenci eklenmesi bu maçın 3/3 kontrolünü değiştirmeyecek. Puanlar, süreler, galip ve fikstür değiştirilmedi.');
-        }catch(err){alert('Öğrenci kadrosu kaydedilemedi: '+(err?.message||err));}
     }
     async function sureFirebaseKaydet() {
         if(!aktifSureModal||!navigator.onLine||!firebaseBagli)return alert('Süre kaydı için Firebase bağlantısı gereklidir.');
@@ -882,34 +832,14 @@
         const sorunlar=[];
         const secilenKaynaklar=[];
         for (const [taraf,okul] of [['huk',m.hukOkul],['muh',m.muhOkul]]) {
+            // Bu maçın katılımcıları, bu maça ait jüri puan kayıtlarından otomatik belirlenir.
+            // Okulun güncel ana listesindeki sonradan ekleme/silme veya okul adı kısaltması
+            // geçmiş maçın puanlarını geçersiz kılamaz.
             const puanlanan=[...new Set(secimlerMac.filter(v=>puanKaydiTarafiniBul(v,m)===taraf)
-                .map(v=>(v.secim?.ogr||'').split(' (')[0]).filter(Boolean))];
-            const seciliKaynak=m.ogrenciKaynaklari?.[taraf]||'';
-            // Explicitly saved school-source mapping remains authoritative if the school's master roster changes later.
-            const kaynak=seciliKaynak&&Array.isArray(okullar[seciliKaynak])&&okullar[seciliKaynak].length
-                ?seciliKaynak:guvenliKadroKaynagiBul(okullar,m,taraf,puanlanan);
-            secilenKaynaklar.push(kaynak);
-            const rosterKeys=new Set((okullar[kaynak]||[]).map(skorEslesmeAnahtari));
-            const kayitliSnapshot=m.ogrenciKadroSnapshot?.[taraf];
-            const snapshotVar=Array.isArray(kayitliSnapshot)&&kayitliSnapshot.length>0;
-            const beklenenAdlar=snapshotVar
-                ?[...new Set(kayitliSnapshot.map(x=>String(x||'').trim()).filter(Boolean))]
-                :puanlanan;
-            if(beklenenAdlar.length!==3)
-                sorunlar.push(okul+': Bu maç için sabit/puanlanmış öğrenci sayısı '+beklenenAdlar.length+'; her takım için 3 konuşmacı bekleniyor.');
-            if(!kaynak)
-                sorunlar.push(okul+': doğrulanmış öğrenci kadrosu eşleşmesi bulunamadı. Öğrenci listesi kaynağını yönetici ekranından doğrulayın.');
-            if(snapshotVar){
-                const snapshotKeys=new Set(beklenenAdlar.map(skorEslesmeAnahtari));
-                const fazladan=puanlanan.filter(ad=>!snapshotKeys.has(skorEslesmeAnahtari(ad)));
-                for(const ad of fazladan)sorunlar.push(okul+': maçın sabit kadrosunda olmayan puan kaydı: '+ad+'.');
-            }
-            for(const ogr of beklenenAdlar){
-                beklenen.push({okul,ogr,key:key(taraf,ogr)});
-                // Once a participant snapshot exists, later additions/removals in the school's general list do not alter this match.
-                if(!snapshotVar&&kaynak&&!rosterKeys.has(skorEslesmeAnahtari(ogr)))
-                    sorunlar.push(okul+' / '+ogr+': öğrenci mevcut okul listesinde bulunamadı. Bu maç için kadro görüntüsünü yönetici ekranından sabitleyin.');
-            }
+                .map(v=>(v.secim?.ogr||'').split(' (')[0].trim()).filter(Boolean))];
+            if(puanlanan.length!==3)
+                sorunlar.push(okul+': Bu maçta puan kaydı bulunan '+puanlanan.length+' farklı öğrenci var; her takım için 3 konuşmacı bekleniyor.');
+            for(const ogr of puanlanan)beklenen.push({okul,ogr,key:key(taraf,ogr)});
         }        if(secilenKaynaklar[0]&&secilenKaynaklar[0]===secilenKaynaklar[1])
             sorunlar.push('İki takım aynı öğrenci kadrosuna eşleştirilemez; manuel doğrulama gerekli.');
         if(!m.hukOkul||!m.muhOkul)sorunlar.push('İki okul tanımlı değil.');
