@@ -642,8 +642,9 @@
         const list={huk:new Map(),muh:new Map()};
         for(const v of Object.values(m?.konusmaSayaclari||{})){
             if(!v?.ogrenci)continue;
-            // 6 dakika dolması puanlama penceresini değil konuşma zamanını bitirir; konuşma süresi yalnız açık bitirişle doğrulanır.
-            if(v.bitisNedeni!=='konusma_bitti')continue;
+            // Konuşma süresi: jüri erken bitirdiyse gerçek geçen süre; 6:00 dolduysa tam süre.
+            // Her iki durum da puan gönderiminden bağımsızdır.
+            if(!['konusma_bitti','sure_doldu'].includes(v.bitisNedeni))continue;
             const s=ortakSureKalan(v);
             if(!s?.bitti)continue;
             let taraf=v.taraf==='HÜKÜMET'?'huk':v.taraf==='MUHALEFET'?'muh':'';
@@ -721,10 +722,10 @@
                                 skorEslesmeAnahtari(x?.ogrenci)===skorEslesmeAnahtari(ad) &&
                                 (x.taraf===(taraf==='huk'?'HÜKÜMET':'MUHALEFET') || skorEslesmeAnahtari(x.okul)===skorEslesmeAnahtari(okul)));
                         const otomatikSure=ortakSureKalan(otomatik);
-                        const acikcaBitirildi=otomatik?.bitisNedeni==='konusma_bitti';
-                        const otomatikKayitGecerli=m.sureEsitlik?.kaynak!=='otomatik'||acikcaBitirildi;
+                        const sureTamamlandi=['konusma_bitti','sure_doldu'].includes(otomatik?.bitisNedeni)&&!!otomatikSure?.bitti;
+                        const otomatikKayitGecerli=m.sureEsitlik?.kaynak!=='otomatik'||sureTamamlandi;
                         const value=v&&Number.isInteger(v.saniye)&&otomatikKayitGecerli
-                            ?v.saniye:(acikcaBitirildi&&otomatikSure?.bitti?otomatikSure.gecen:0);
+                            ?v.saniye:(sureTamamlandi?otomatikSure.gecen:0);
                         const id=taraf+'_'+i;
                         return `<div class="sure-student-row"><span class="sure-student-name">${i+1}. ${htmlEscape(ad)}</span>
                             <input id="sureTakim${id}" value="${sureyiMetneDonustur(value)}" inputmode="numeric" aria-label="${htmlEscape(ad)} konuşma süresi" oninput="sureTakimToplamlariniGuncelle()" ${saltOkunur?'disabled':''}>
@@ -1628,7 +1629,7 @@
             for(const record of records){
                 const ad=skorEslesmeAnahtari(record?.ad);
                 const matches=timers.filter(timer=>{
-                    if(!timer||timer.bitisNedeni!=='konusma_bitti'||skorEslesmeAnahtari(timer.ogrenci)!==ad)return false;
+                    if(!timer||!['konusma_bitti','sure_doldu'].includes(timer.bitisNedeni)||skorEslesmeAnahtari(timer.ogrenci)!==ad)return false;
                     const timerSide=timer.taraf==='HÜKÜMET'?'huk':timer.taraf==='MUHALEFET'?'muh':'';
                     if(timerSide)return timerSide===taraf;
                     return skorEslesmeAnahtari(timer.okul)===skorEslesmeAnahtari(okulKaynak);
