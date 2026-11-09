@@ -875,23 +875,33 @@
         for (const [taraf,okul] of [['huk',m.hukOkul],['muh',m.muhOkul]]) {
             const puanlanan=[...new Set(secimlerMac.filter(v=>puanKaydiTarafiniBul(v,m)===taraf)
                 .map(v=>(v.secim?.ogr||'').split(' (')[0]).filter(Boolean))];
-            const kaynak=guvenliKadroKaynagiBul(okullar,m,taraf,puanlanan);
+            const seciliKaynak=m.ogrenciKaynaklari?.[taraf]||'';
+            // Explicitly saved school-source mapping remains authoritative if the school's master roster changes later.
+            const kaynak=seciliKaynak&&Array.isArray(okullar[seciliKaynak])&&okullar[seciliKaynak].length
+                ?seciliKaynak:guvenliKadroKaynagiBul(okullar,m,taraf,puanlanan);
             secilenKaynaklar.push(kaynak);
-            const ogrenciler=okullar[kaynak]||[];
-            const rosterKeys=new Set(ogrenciler.map(skorEslesmeAnahtari));
-            // Genel okul listesine sonradan eklenen öğrenciler eski maça geriye dönük eklenmez.
-            // Her takımın bu maçta puanlanan üç konuşmacısı esas alınır.
-            if(puanlanan.length!==3)
-                sorunlar.push(`${okul}: Bu maçta puan kaydı bulunan ${puanlanan.length} öğrenci var; her takım için 3 konuşmacı bekleniyor.`);
+            const rosterKeys=new Set((okullar[kaynak]||[]).map(skorEslesmeAnahtari));
+            const kayitliSnapshot=m.ogrenciKadroSnapshot?.[taraf];
+            const snapshotVar=Array.isArray(kayitliSnapshot)&&kayitliSnapshot.length>0;
+            const beklenenAdlar=snapshotVar
+                ?[...new Set(kayitliSnapshot.map(x=>String(x||'').trim()).filter(Boolean))]
+                :puanlanan;
+            if(beklenenAdlar.length!==3)
+                sorunlar.push(okul+': Bu maç için sabit/puanlanmış öğrenci sayısı '+beklenenAdlar.length+'; her takım için 3 konuşmacı bekleniyor.');
             if(!kaynak)
-                sorunlar.push(`${okul}: doğrulanmış öğrenci kadrosu eşleşmesi bulunamadı. Öğrenci listesi kaynağını yönetici ekranından doğrulayın.`);
-            for(const ogr of puanlanan){
-                beklenen.push({okul,ogr,key:key(taraf,ogr)});
-                if(kaynak&&!rosterKeys.has(skorEslesmeAnahtari(ogr)))
-                    sorunlar.push(`${okul} / ${ogr}: puanlanan öğrenci seçilen kayıtlı okul listesinde bulunamadı.`);
+                sorunlar.push(okul+': doğrulanmış öğrenci kadrosu eşleşmesi bulunamadı. Öğrenci listesi kaynağını yönetici ekranından doğrulayın.');
+            if(snapshotVar){
+                const snapshotKeys=new Set(beklenenAdlar.map(skorEslesmeAnahtari));
+                const fazladan=puanlanan.filter(ad=>!snapshotKeys.has(skorEslesmeAnahtari(ad)));
+                for(const ad of fazladan)sorunlar.push(okul+': maçın sabit kadrosunda olmayan puan kaydı: '+ad+'.');
             }
-        }
-        if(secilenKaynaklar[0]&&secilenKaynaklar[0]===secilenKaynaklar[1])
+            for(const ogr of beklenenAdlar){
+                beklenen.push({okul,ogr,key:key(taraf,ogr)});
+                // Once a participant snapshot exists, later additions/removals in the school's general list do not alter this match.
+                if(!snapshotVar&&kaynak&&!rosterKeys.has(skorEslesmeAnahtari(ogr)))
+                    sorunlar.push(okul+' / '+ogr+': öğrenci mevcut okul listesinde bulunamadı. Bu maç için kadro görüntüsünü yönetici ekranından sabitleyin.');
+            }
+        }        if(secilenKaynaklar[0]&&secilenKaynaklar[0]===secilenKaynaklar[1])
             sorunlar.push('İki takım aynı öğrenci kadrosuna eşleştirilemez; manuel doğrulama gerekli.');
         if(!m.hukOkul||!m.muhOkul)sorunlar.push('İki okul tanımlı değil.');
         const expectedKeys=new Set();
