@@ -698,6 +698,14 @@
     function sureSureFormuGoster(baglam,ogrenciler,kaynaklar){
         const {kategori,macId,mac:m}=baglam;
             const saltOkunur=m.durum==='kapali' && !adminYetkiliMi(); // Kapalı maçı yalnız yönetici düzeltebilir.
+            // Eski maçlarda okulun güncel ana listesi değişmiş olabilir. Süre tutanağı sadece o maçın
+            // sabitlenmiş veya puan kayıtlarından doğrulanmış üç katılımcısını göstermelidir.
+            ogrenciler={
+                huk:Array.isArray(m.ogrenciKadroSnapshot?.huk)&&m.ogrenciKadroSnapshot.huk.length===3
+                    ?m.ogrenciKadroSnapshot.huk:(baglam.puandan?.huk?.length===3?baglam.puandan.huk:ogrenciler.huk),
+                muh:Array.isArray(m.ogrenciKadroSnapshot?.muh)&&m.ogrenciKadroSnapshot.muh.length===3
+                    ?m.ogrenciKadroSnapshot.muh:(baglam.puandan?.muh?.length===3?baglam.puandan.muh:ogrenciler.muh)
+            };
             aktifSureModal={kategori,macId,mac:m,ogrenciler,kaynaklar,
                 okullar:baglam.okullar||{},puandan:baglam.puandan||{huk:[],muh:[]},
                 oncekiGuncelleme:m.sureEsitlik?.updatedAt||0};
