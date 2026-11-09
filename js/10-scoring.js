@@ -776,6 +776,7 @@
     const ortakSureUyariVerilenler=new Set();
     let ortakSureSunucuFarki=0,aktifOrtakSureRef=null,aktifOrtakSureTick=null;
     let aktifOrtakSureVerisi=null,aktifOrtakSureKimlik=null,ortakSureBittirmeCalisiyor=false;
+    let aktifOrtakSureVeriYuklendi=false,aktifOrtakSureMacAcik=null,liseSureBaslatmaBekliyor=false;
     let aktifSecimSureTick=null;
     function ortakSureSimdi(){return Date.now()+ortakSureSunucuFarki;}
     async function ortakSureSaatiSenkronizeEt(){
@@ -998,16 +999,19 @@ Devam edilsin mi?`)){
         if(aktifOrtakSureRef){try{aktifOrtakSureRef.off();}catch(_){}aktifOrtakSureRef=null;}
         if(aktifOrtakSureTick)clearInterval(aktifOrtakSureTick);
         aktifOrtakSureTick=null;aktifOrtakSureKimlik=null;aktifOrtakSureVerisi=null;
+        aktifOrtakSureVeriYuklendi=false;aktifOrtakSureMacAcik=null;
         if(aktifSecimSureTick)clearInterval(aktifSecimSureTick);
         aktifSecimSureTick=null;
     }
-    async function ortakSureBaslat(kategori,mac,okul,ogrenci){
+    async function ortakSureBaslat(kategori,mac,okul,ogrenci,acikBaslatmaIcin=false){
         const host=document.getElementById('ortakKonusmaSayaci');if(!host)return;
         const ad=(ogrenci||'').split(' (')[0];
         const id=ortakSureKimligi(okul,ad);
         const ref=db.ref(`maclar/${kategori}/${mac.id}/konusmaSayaclari/${id}`);
         ortakSureTemizle();aktifOrtakSureKimlik={kategori,macId:mac.id,id,ogrenci:ad,okul};
-        host.textContent='⏱ Ortak 6 dakikalık süre Firebase’den kontrol ediliyor…';
+        host.textContent=kategori==='LİSE'
+            ?'⏱ Lise değerlendirme süresi Firebase’den kontrol ediliyor…'
+            :'⏱ Ortak 6 dakikalık süre Firebase’den kontrol ediliyor…';
         try{
             const offset=(await db.ref('.info/serverTimeOffset').once('value')).val();
             if(typeof offset==='number')ortakSureSunucuFarki=offset;
@@ -1015,36 +1019,64 @@ Devam edilsin mi?`)){
             aktifOrtakSureRef=ref;
             ref.on('value',snapshot=>{
                 if(aktifOrtakSureRef!==ref)return;
-                aktifOrtakSureVerisi=snapshot.val();ortakSureGoster();
-            },err=>{if(aktifOrtakSureRef===ref){aktifOrtakSureVerisi=null;host.innerHTML='Sayaç okunamadı: '+htmlEscape(err.message||err)+'<div><button class="btn" style="width:auto;margin-top:8px;background:#92400e" onclick="juriSurePenceresiniSifirla(\'puanlama_ekrani\')">↻ Sorun giderme için ortak süreyi sıfırla</button></div>';ortakPuanArayuzunuGuncelle();}});
+                aktifOrtakSureVerisi=snapshot.val();
+                aktifOrtakSureVeriYuklendi=true;
+                ortakSureGoster();
+            },err=>{if(aktifOrtakSureRef===ref){
+                aktifOrtakSureVerisi=null;aktifOrtakSureVeriYuklendi=false;
+                host.innerHTML='Sayaç okunamadı: '+htmlEscape(err.message||err)+'<div><button class="btn" style="width:auto;margin-top:8px;background:#92400e" onclick="juriSurePenceresiniSifirla(\'puanlama_ekrani\')">↻ Sorun giderme için ortak süreyi sıfırla</button></div>';
+                ortakPuanArayuzunuGuncelle();
+            }});
             aktifOrtakSureTick=setInterval(ortakSureGoster,1000);
             const m=await macDurumuGetir(kategori,mac.id);
-            if(m.durum==='kapali'||m.durum==='iptal')return;
-            // Veri zaten varsa kimse yeniden başlatamaz (birden çok jüri güvenli).
+            aktifOrtakSureMacAcik=!['kapali','iptal'].includes(String(m?.durum||'acik').toLocaleLowerCase('tr-TR'));
+            if(m.durum==='kapali'||m.durum==='iptal'){
+                ortakSureGoster();
+                return;
+            }
+            // Lise kategorisinde ekranı açmak yalnızca mevcut sayacı dinler.
+            // Yeni sayaç ancak jüri "Değerlendirmeyi Başlat" düğmesine bastığında oluşturulur.
+            if(kategori==='LİSE'&&!acikBaslatmaIcin){
+                ortakSureGoster();
+                return;
+            }
             if(!navigator.onLine||!firebaseBagli){
                 if(host)host.textContent='Bağlantı yok: ortak sayaç başlatılmadı.';
                 return;
             }
             let yedek=null;
             const mevcut=await ref.once('value');
-            if(!mevcut.exists()){
+            // Ortaokulun mevcut arşivden geri yükleme davranışı korunur.
+            // Lise için eski arşiv kaydı otomatik canlandırılmaz; açık onayla yeni sayaç başlatılır.
+            if(!mevcut.exists()&&kategori!=='LİSE'){
                 try{
                     const yedekSnap=await db.ref(ortakSureYedekYolu(kategori,mac.id,id)+'/sonDurum').once('value');
                     yedek=yedekSnap.val()||null;
                 }catch(err){console.warn('Ortak süre arşiv yedeği okunamadı:',err);}
             }
-            const yedekGecerli=!!(yedek&&Number(yedek.baslangicAt)>0&&
+            const yedekGecerli=!!(kategori!=='LİSE'&&yedek&&Number(yedek.baslangicAt)>0&&
                 ['calisiyor','bitti','tamamlandi'].includes(yedek.durum));
+            const baslatan=juriOturumuGetir()||{};
             const baslatma=await ref.transaction(cur=>{
                 if(cur)return cur;
                 if(yedekGecerli)return {...yedek,arsivdenGeriYuklendiAt:ortakSureSimdi()};
                 return {ogrenci:ad,okul,taraf:secimler.taraf,baslangicAt:ortakSureSimdi(),
-                    limitSaniye:ORTAK_SURE_LIMIT,durum:'calisiyor',kaynak:'juri_puanlama',version:1};
+                    limitSaniye:ORTAK_SURE_LIMIT,durum:'calisiyor',
+                    kaynak:'juri_puanlama',
+                    baslatmaOnayi:kategori==='LİSE'?'juri_degerlendirmeyi_baslat':'otomatik',
+                    baslatanJuri:kategori==='LİSE'?(baslatan.juri||''):'',
+                    baslatanJuriAd:kategori==='LİSE'?(baslatan.ad||''):'',
+                    version:1};
             },undefined,false);
             const sonVeri=baslatma.snapshot?.val()||null;
-            if(sonVeri){
+            if(sonVeri&&aktifOrtakSureKimlik?.id===id){
+                aktifOrtakSureVerisi=sonVeri;aktifOrtakSureVeriYuklendi=true;
+                ortakSureGoster();
+            }
+            if(sonVeri&&(kategori!=='LİSE'||baslatma.committed)){
                 void ortakSureYedeginiKaydet(kategori,mac.id,id,sonVeri,
-                    baslatma.committed&&yedekGecerli?'arsivden_geri_yuklendi':'sayac_kontrol')
+                    baslatma.committed&&yedekGecerli?'arsivden_geri_yuklendi':
+                    kategori==='LİSE'?'juri_degerlendirmeyi_baslatti':'sayac_kontrol')
                     .catch(err=>console.warn('Ortak süre yedeği yazılamadı:',err));
                 if(baslatma.committed&&yedekGecerli){
                     const bilgi=document.getElementById('ortakKonusmaSayaci');
@@ -1053,10 +1085,29 @@ Devam edilsin mi?`)){
             }
         }catch(err){
             const alan=document.getElementById('ortakKonusmaSayaci');
-            aktifOrtakSureVerisi=null;
+            aktifOrtakSureVerisi=null;aktifOrtakSureVeriYuklendi=false;
             if(alan)alan.innerHTML='Ortak sayaç başlatılamadı: '+htmlEscape(String(err?.message||err))+'<div><button class="btn" style="width:auto;margin-top:8px;background:#92400e" onclick="juriSurePenceresiniSifirla(\'puanlama_ekrani\')">↻ Sorun giderme için ortak süreyi sıfırla</button></div>';
             ortakPuanArayuzunuGuncelle();
         }
+    }
+    async function liseDegerlendirmeyiBaslat(){
+        if(secimler.kategori!=='LİSE'||liseSureBaslatmaBekliyor)return;
+        const kimlik=aktifOrtakSureKimlik;
+        if(!kimlik||!document.getElementById('ortakKonusmaSayaci'))return;
+        if(!juriOturumuGetir())return alert('Önce günün jüri listesinden jüri oturumunuzu açın.');
+        if(aktifOrtakSureVerisi?.baslangicAt){
+            ortakSureGoster();
+            return;
+        }
+        if(aktifOrtakSureVerisi){
+            return alert('Sayaç kaydı mevcut ancak başlangıç zamanı doğrulanamadı. Kayıt değiştirilmedi; yönetici incelemesi gerekiyor.');
+        }
+        const mac=puanlamaMaclar.get(kimlik.macId)||mevcutMacBilgisi();
+        if(!mac||mac.id!==kimlik.macId)return alert('Seçili maç bilgisi doğrulanamadı. Sayaç başlatılmadı.');
+        liseSureBaslatmaBekliyor=true;
+        ortakSureGoster();
+        await ortakSureBaslat(kimlik.kategori,mac,kimlik.okul,kimlik.ogrenci,true);
+        liseSureBaslatmaBekliyor=false;
     }
     function ortakSureUyariSesiCal(){
         // Ses engellense bile görünür uyarı aşağıda mutlaka gösterilir.
@@ -1101,7 +1152,7 @@ Devam edilsin mi?`)){
         }
         const not=document.getElementById('puanGirisSureNotu'),veri=aktifOrtakSureVerisi;
         if(not){
-            if(!veri||!Number(veri.baslangicAt))not.textContent='Süre doğrulaması bekleniyor; puan girişi açık ve taslaklar otomatik saklanır.';
+            if(!veri||!Number(veri.baslangicAt))not.textContent=secimler.kategori==='LİSE'?'Lise süresi henüz başlamadı. “Değerlendirmeyi Başlat” ile süre üç jüri cihazında ortak başlar; taslağınız korunur.':'Süre doğrulaması bekleniyor; puan girişi açık ve taslaklar otomatik saklanır.';
             else if(ortakPuanPenceresiKapandi(veri))not.textContent='Ek 1 dakikalık süre doldu. Puan girişi açık kalır; geç gönderim yönetici incelemesi için arşivlenir.';
             else not.textContent='Puan girişi açık. 6 dakika sonunda 1 dakika ek gönderim süresi vardır.';
         }
@@ -1112,8 +1163,22 @@ Devam edilsin mi?`)){
         const v=aktifOrtakSureVerisi;
         const s=ortakSureKalan(v);
         if(!s){
-            host.innerHTML=`⏱ Ortak sayaç henüz oluşmadı veya okunamadı. Puanlama penceresi doğrulanamıyor.
-                <div><button class="btn" style="width:auto;margin-top:8px;background:#92400e" onclick="juriSurePenceresiniSifirla('puanlama_ekrani')">↻ Sorun giderme için ortak süreyi sıfırla</button></div>`;
+            if(secimler.kategori==='LİSE'){
+                let mesaj='';
+                if(!aktifOrtakSureVeriYuklendi)mesaj='⏱ Lise değerlendirme süresi Firebase’den okunuyor…';
+                else if(aktifOrtakSureMacAcik===null)mesaj='⏱ Maç durumu doğrulanıyor…';
+                else if(aktifOrtakSureMacAcik===false)mesaj='⏱ Bu maç kapalı veya iptal edilmiş. Yeni süre başlatılamaz.';
+                else if(aktifOrtakSureVerisi)mesaj='⏱ Sayaç kaydı var ancak başlangıç zamanı geçerli değil. Kayıt değiştirilmedi; yönetici incelemesi gerekiyor.';
+                else if(liseSureBaslatmaBekliyor)mesaj='⏱ Değerlendirme başlatılıyor; ortak sayaç jüri cihazlarına aktarılıyor…';
+                else mesaj='⏱ Lise değerlendirme süresi henüz başlamadı. İlk jüri başlattığında üç jüri için aynı anda başlayacaktır.';
+                host.innerHTML='<div style="font-weight:700">'+htmlEscape(mesaj)+'</div>'+
+                    (aktifOrtakSureVeriYuklendi&&aktifOrtakSureMacAcik===true&&!aktifOrtakSureVerisi&&!liseSureBaslatmaBekliyor
+                        ?'<button type="button" class="btn" style="width:auto;margin-top:10px;background:#0f766e" onclick="liseDegerlendirmeyiBaslat()">▶ Değerlendirmeyi Başlat</button>'
+                        :'');
+            }else{
+                host.innerHTML=`⏱ Ortak sayaç henüz oluşmadı veya okunamadı. Puanlama penceresi doğrulanamıyor.
+                    <div><button class="btn" style="width:auto;margin-top:8px;background:#92400e" onclick="juriSurePenceresiniSifirla('puanlama_ekrani')">↻ Sorun giderme için ortak süreyi sıfırla</button></div>`;
+            }
             ortakPuanArayuzunuGuncelle();return;
         }
         const bitti=s.bitti;
