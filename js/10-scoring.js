@@ -1153,8 +1153,8 @@ Devam edilsin mi?`)){
         const not=document.getElementById('puanGirisSureNotu'),veri=aktifOrtakSureVerisi;
         if(not){
             if(!veri||!Number(veri.baslangicAt))not.textContent=secimler.kategori==='LİSE'?'Lise süresi henüz başlamadı. “Değerlendirmeyi Başlat” ile süre üç jüri cihazında ortak başlar; taslağınız korunur.':'Süre doğrulaması bekleniyor; puan girişi açık ve taslaklar otomatik saklanır.';
-            else if(ortakPuanPenceresiKapandi(veri))not.textContent='Ek 1 dakikalık süre doldu. Puan girişi açık kalır; geç gönderim yönetici incelemesi için arşivlenir.';
-            else not.textContent='Puan girişi açık. 6 dakika sonunda 1 dakika ek gönderim süresi vardır.';
+            else if(veri.durum==='tamamlandi'||veri.durum==='bitti'||veri.bitisNedeni==='konusma_bitti')not.textContent='Konuşma süresi tamamlandı. Puan girişi kapanmaz; 13 kriteri tamamlayıp gönderebilirsiniz.';
+            else not.textContent='Puan girişi açık. Konuşma süresi ayrı kaydedilir; süre dolması puan göndermeyi engellemez.';
         }
     }
     function ortakSureGoster(){
@@ -1185,23 +1185,17 @@ Devam edilsin mi?`)){
         const eskiErkenKapanma=ortakSureErkenKapanmaKaydi(v);
         const ortakSayacAktif=v?.durum==='calisiyor'||(eskiErkenKapanma&&!bitti);
         const besDakikaUyarisi=ortakSayacAktif&&s.gecen>=ORTAK_SURE_UYARI;
-        const sonAt=ortakPuanSonAt(v);
-        const simdi=ortakSureSimdi();
-        const puanKapandi=simdi>sonAt;
-        const ekSureKalan=Math.max(0,Math.ceil((sonAt-simdi)/1000));
-        const altiDakikaDoldu=simdi>=Number(v.baslangicAt||0)+ORTAK_SURE_LIMIT*1000;
-        const ekSureAktif=bitti&&!puanKapandi;
         const erkenKonusmaBitisi=v?.bitisNedeni==='konusma_bitti';
-        const baslik=puanKapandi?'PUAN GİRİŞ SÜRESİ DOLDU':erkenKonusmaBitisi?'KONUŞMA BİTTİ — JÜRİ PUANLAMASI DEVAM EDİYOR':ekSureAktif?(v.durum==='tamamlandi'?'6 DAKİKA DOLDU':'ORTAK SÜRE BİTTİ')+' — PUAN GÖNDERME İÇİN SON '+ekSureKalan+' SN':bitti?'SÜRE TAMAMLANDI':'Kalan süre: '+sureyiMetneDonustur(s.kalan);
-        host.innerHTML=`<div style="font-size:17px;font-weight:bold;color:${puanKapandi?'#fb7185':ekSureAktif?'#facc15':bitti?'#fb7185':besDakikaUyarisi?'#facc15':'#38bdf8'}">⏱ ${baslik}</div>
+        const baslik=bitti
+            ?(erkenKonusmaBitisi?'KONUŞMA BİTTİ — PUAN GİRİŞİ AÇIK':'KONUŞMA SÜRESİ TAMAMLANDI — PUAN GİRİŞİ AÇIK')
+            :'Kalan süre: '+sureyiMetneDonustur(s.kalan);
+        const renk=bitti?'#f59e0b':besDakikaUyarisi?'#facc15':'#38bdf8';
+        host.innerHTML=`<div style="font-size:17px;font-weight:bold;color:${renk}">⏱ ${baslik}</div>
             <div style="font-size:12px">${htmlEscape(v.ogrenci||'')} · Kullanılan: ${sureyiMetneDonustur(s.gecen)} · Firebase ortak sayacı</div>
-            ${erkenKonusmaBitisi&&!puanKapandi?`<div role="status" style="background:#123b35;color:#a7f3d0;border:1px solid #0f766e;padding:10px;border-radius:8px;margin-top:8px;font-size:13px;font-weight:700;">Konuşma süresi ${sureyiMetneDonustur(s.gecen)} olarak kaydedildi. Diğer jüri üyeleri, ortak başlangıçtan itibaren 6 dakika + 1 dakikalık süre dolana kadar puanlamaya devam edebilir. Kalan puanlama süresi: ${sureyiMetneDonustur(ekSureKalan)}.</div>`:''}
+            ${bitti?`<div role="status" style="background:#123b35;color:#a7f3d0;border:1px solid #0f766e;padding:10px;border-radius:8px;margin-top:8px;font-size:13px;font-weight:700;">${erkenKonusmaBitisi?'Jüri konuşmanın bittiğini kaydetti.':'Konuşma süresi 06:00’da tamamlandı.'} Puan girişi kapanmaz; jüri 13 kriteri tamamlayıp istediği zaman gönderebilir.</div>`:''}
             ${besDakikaUyarisi?'<div role="alert" style="background:#713f12;color:#fef08a;border:2px solid #facc15;padding:12px;border-radius:10px;margin-top:10px;font-size:17px;font-weight:800;">⚠️ 5. DAKİKA DOLDU — SON 1 DAKİKA! Öğrenciyi uyarın.</div>':''}
-            ${ekSureAktif&&!erkenKonusmaBitisi?`<div role="alert" style="background:#713f12;color:#fef08a;border:1px solid #facc15;padding:9px;border-radius:8px;margin-top:8px;font-size:13px;font-weight:750;">⚠️ Puan göndermek için yalnızca ${ekSureKalan} saniye kaldı. Süre dolunca puan seçimi ve gönderme kapanır.</div>`:''}
-            ${puanKapandi?'<div role="alert" style="background:#451a1a;color:#fecaca;border:1px solid #b91c1c;padding:9px;border-radius:8px;margin-top:8px;font-size:13px;font-weight:750;">Ortak sayaç bittikten sonra ek 1 dakika de tamamlandı. Puan seçimi/gönderme kapatıldı. Gerekliyse seçili öğrenci için isteğe bağlı sıfırlama yapın; bu işlem tüm jüri cihazlarını etkiler ve kayda alınır.</div>':''}
-            ${!bitti?'<button class="btn" style="width:auto;margin-top:7px;padding:6px 12px;background:#475569" onclick="ortakSureErkenBitir()">⏹ Konuşma bitti — süreyi kaydet</button>':''}
-            ${puanKapandi?`<button class="btn" style="width:auto;margin-top:7px;padding:7px 12px;background:#92400e" onclick="juriSurePenceresiniSifirla('puanlama_ekrani')">↻ Sorun varsa ortak süreyi sıfırla</button>`:''}`;
-        ortakPuanArayuzunuGuncelle();
+            ${!bitti?'<button class="btn" style="width:auto;margin-top:7px;padding:6px 12px;background:#475569" onclick="ortakSureErkenBitir()">⏹ Konuşma bitti — süreyi kaydet</button>':''}`;
+
         if(besDakikaUyarisi&&(v.durum==='calisiyor'||eskiErkenKapanma))
             ortakSureBirDakikaUyarisiKontrolEt(v,aktifOrtakSureKimlik?.kategori,aktifOrtakSureKimlik?.macId,aktifOrtakSureKimlik?.id);
         // Sayaç yalnızca gerçek 6 dakika dolduğunda kapanır. Eski sürümün
@@ -1499,58 +1493,10 @@ Devam edilsin mi?`)){
                 updatedAt: firebase.database.ServerValue.TIMESTAMP,
                 queuedOffline: false
             };
-            // Ağda kayıt öncesi son ortak süre denetimi: gönderim tıklaması geç kalmışsa yazma.
-            const sonTimerSnap=await db.ref(`maclar/${secimler.kategori}/${mac.id}/konusmaSayaclari/${ortakSureKimligi(secimler.okul,(secimler.ogr||'').split(' (')[0])}`).once('value');
-            const sonTimer=sonTimerSnap.val();
-            if(!sonTimer || !Number(sonTimer.baslangicAt)){
-                const neden='Ortak süre bilgisi doğrulanamadı. Girilen 13 kriter resmî puana eklenmeden yönetici incelemesi için arşivleniyor.';
-                puanKuyrukItem.queueStatus='sure_engeli_arsiv_bekliyor';
-                puanKuyrukItem.officialSendAllowed=false;
-                puanKuyrukItem.reddedilmeNedeni=neden;
-                puanKuyrukDurumunuGuncelle(secimler.kategori,kayitId,{
-                    queueStatus:'sure_engeli_arsiv_bekliyor',officialSendAllowed:false,reddedilmeNedeni:neden
-                });
-                try{
-                    await puanReddedilenKaydiniArsivle(puanKuyrukItem,neden,'puan_sure_dogrulama_bekliyor_arsivlendi');
-                    puanKuyrugundanSil(secimler.kategori,kayitId);
-                }catch(arsivErr){
-                    puanKuyrukDurumunuGuncelle(secimler.kategori,kayitId,{lastError:String(arsivErr?.message||arsivErr)});
-                }
-                await juriSureOturumLogunuGuncelle({durum:'puan_sure_dogrulama_bekliyor',hata:neden,
-                    puanVerisi:{...kayitTemel.puanlar},kayitId,puanGonderildi:false,reddedilenPuanArsivlendi:true})
-                    .catch(e=>console.warn('Süre doğrulama günlüğü yazılamadı:',e));
-                alert('13 kriter kaybolmadı. Süre doğrulanamadığı için arşive alındı; yönetici geçmiş kayıttan inceleyebilir.');
-                return;
-            }
-            if(!ortakPuanPenceresiAcik(sonTimer,puanGondermeAni)){
-                aktifOrtakSureVerisi=sonTimer||aktifOrtakSureVerisi;ortakSureGoster();
-                await juriSureOlayiYaz(juriSureDenetimTemeli({islem:'puan_gonderme',durum:'engellendi_son_kontrol',
-                    hata:'Firebase üzerindeki son süre kontrolünde ortak sayaç bitişinden sonraki 1 dakikalık sınır aşılmış.',
-                    sifirlamaSecenegiSunuldu:true,sifirlamaTalepEdildi:false,sifirlamaKullanildi:false,
-                    izinVerilenEkSureSaniye:ORTAK_PUAN_EK_SURE})).catch(e=>console.warn('Son kontrol günlüğü yazılamadı:',e));
-                await juriSureOturumLogunuGuncelle({durum:'puan_gonderme_engellendi_sure_asimi',puanGonderildi:false,
-                    puanGondermeEngelNedeni:'Firebase son kontrolünde 1 dakikalık pencere doldu.'});
-                const sureNedeni='Firebase üzerindeki son kontrol, ortak puanlama penceresinin dolduğunu gösterdi. Puan resmî tabloya alınmadı.';
-                try{
-                    puanKuyrukDurumunuGuncelle(secimler.kategori,kayitId,{queueStatus:'sure_engeli_arsiv_bekliyor',
-                        officialSendAllowed:false,reddedilmeNedeni:sureNedeni});
-                    puanKuyrukItem.queueStatus='sure_engeli_arsiv_bekliyor';puanKuyrukItem.officialSendAllowed=false;
-                    puanKuyrukItem.reddedilmeNedeni=sureNedeni;
-                    await puanReddedilenKaydiniArsivle(puanKuyrukItem,sureNedeni,'puan_sure_engeli_arsivlendi');
-                    puanKuyrugundanSil(secimler.kategori,kayitId);
-                    await juriSureOturumLogunuGuncelle({durum:'puan_sure_engeli_arsivlendi',hata:sureNedeni,
-                        puanVerisi:{...kayitTemel.puanlar},kayitId,puanGonderildi:false,reddedilenPuanArsivlendi:true});
-                    alert('Puanlama süresi dolduğu için resmî puan kaydı yapılmadı. Girilen kriterler yönetici incelemesi için arşivlendi. Gerekliyse süre sıfırlamasıyla yeniden puanlayın.');
-                }catch(arsivErr){
-                    puanKuyrukDurumunuGuncelle(secimler.kategori,kayitId,{queueStatus:'sure_engeli_arsiv_bekliyor',
-                        officialSendAllowed:false,reddedilmeNedeni:sureNedeni,lastError:String(arsivErr?.message||arsivErr)});
-                    await juriSureOturumLogunuGuncelle({durum:'puan_sure_engeli_arsiv_hatasi',hata:String(arsivErr?.message||arsivErr),
-                        puanVerisi:{...kayitTemel.puanlar},kayitId,puanGonderildi:false});
-                    alert('Puanlama süresi dolduğu için resmî kayda eklenmedi. Arşiv aktarımı tamamlanamadı; 13 kriter kuyrukta korundu.');
-                }
-                return;
-            }
-            aktifOrtakSureVerisi=sonTimer;
+            // Konuşma süresi, resmî puan gönderme izni değildir.
+            // Sayaç bitmiş, eksik veya okunamıyor olsa da 13 kriterli jüri puanı
+            // maç açık olduğu sürece Firebase'e gönderilir ve geri okunarak doğrulanır.
+
             // Doğrudan yalnızca bu jüriye ait kaydı yaz. Başka jürilerin kayıtları ve sayaç
             // bu işlem tarafından hiçbir zaman güncellenmez.
             firebaseYazmaDenendi=true;
