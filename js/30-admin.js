@@ -574,7 +574,16 @@
             }
         }
         if(defaultKaynak.huk&&defaultKaynak.muh && defaultKaynak.huk!==defaultKaynak.muh){
-            sureSureFormuGoster(baglam,{huk:okullar[defaultKaynak.huk],muh:okullar[defaultKaynak.muh]},defaultKaynak);
+            const takimListeleri={};
+            for(const taraf of ['huk','muh']){
+                const roster=okullar[defaultKaynak[taraf]]||[];
+                const scored=puandan[taraf]||[];
+                if(scored.length===3){
+                    takimListeleri[taraf]=scored.map(ad=>roster.find(x=>skorEslesmeAnahtari(x)===skorEslesmeAnahtari(ad))).filter(Boolean);
+                    if(takimListeleri[taraf].length!==3)takimListeleri[taraf]=roster;
+                }else takimListeleri[taraf]=roster;
+            }
+            sureSureFormuGoster(baglam,takimListeleri,defaultKaynak);
             return;
         }
         const secici=taraf=>{
@@ -634,7 +643,7 @@
         for(const v of Object.values(m?.konusmaSayaclari||{})){
             if(!v?.ogrenci)continue;
             // Six minutes ending is the jury scoring-window timeout, not confirmed speech duration.
-            if(v.bitisNedeni!=='konusma_bitti')continue;
+            if(!['konusma_bitti','sure_doldu'].includes(v.bitisNedeni))continue;
             const s=ortakSureKalan(v);
             if(!s?.bitti)continue;
             let taraf=v.taraf==='HÜKÜMET'?'huk':v.taraf==='MUHALEFET'?'muh':'';
@@ -849,27 +858,30 @@
             gruplar.get(k).set(s.juri,v);
         }
         const beklenen=[];
+        const sorunlar=[];
+        const secilenKaynaklar=[];
         for (const [taraf,okul] of [['huk',m.hukOkul],['muh',m.muhOkul]]) {
             const puanlanan=[...new Set(secimlerMac.filter(v=>puanKaydiTarafiniBul(v,m)===taraf)
                 .map(v=>(v.secim?.ogr||'').split(' (')[0]).filter(Boolean))];
             const kaynak=guvenliKadroKaynagiBul(okullar,m,taraf,puanlanan);
+            secilenKaynaklar.push(kaynak);
             const ogrenciler=okullar[kaynak]||[];
-            for (const ogr of ogrenciler) beklenen.push({okul,ogr,key:key(taraf,ogr)});
+            const rosterKeys=new Set(ogrenciler.map(skorEslesmeAnahtari));
+            // Genel okul listesine sonradan eklenen öğrenciler eski maça geriye dönük eklenmez.
+            // Her takımın bu maçta puanlanan üç konuşmacısı esas alınır.
+            if(puanlanan.length!==3)
+                sorunlar.push(`${okul}: Bu maçta puan kaydı bulunan ${puanlanan.length} öğrenci var; her takım için 3 konuşmacı bekleniyor.`);
+            if(!kaynak)
+                sorunlar.push(`${okul}: doğrulanmış öğrenci kadrosu eşleşmesi bulunamadı. Öğrenci listesi kaynağını yönetici ekranından doğrulayın.`);
+            for(const ogr of puanlanan){
+                beklenen.push({okul,ogr,key:key(taraf,ogr)});
+                if(kaynak&&!rosterKeys.has(skorEslesmeAnahtari(ogr)))
+                    sorunlar.push(`${okul} / ${ogr}: puanlanan öğrenci seçilen kayıtlı okul listesinde bulunamadı.`);
+            }
         }
-        const sorunlar=[];
-        const secilenKaynaklar=['huk','muh'].map(t=>guvenliKadroKaynagiBul(okullar,m,t,
-            [...new Set(secimlerMac.filter(v=>puanKaydiTarafiniBul(v,m)===t)
-                .map(v=>(v.secim?.ogr||'').split(' (')[0]).filter(Boolean))]));
-        if(secilenKaynaklar[0] && secilenKaynaklar[0]===secilenKaynaklar[1])
+        if(secilenKaynaklar[0]&&secilenKaynaklar[0]===secilenKaynaklar[1])
             sorunlar.push('İki takım aynı öğrenci kadrosuna eşleştirilemez; manuel doğrulama gerekli.');
-        if (!m.hukOkul || !m.muhOkul) sorunlar.push('İki okul tanımlı değil.');
-        for(const taraf of ['huk','muh']){
-            const okul=taraf==='huk'?m.hukOkul:m.muhOkul;
-            const kayitlarTaraf=secimlerMac.filter(v=>puanKaydiTarafiniBul(v,m)===taraf);
-            const adlar=[...new Set(kayitlarTaraf.map(v=>(v.secim?.ogr||'').split(' (')[0]).filter(Boolean))];
-            if(!guvenliKadroKaynagiBul(okullar,m,taraf,adlar))
-                sorunlar.push(`${okul}: doğrulanmış öğrenci kadrosu eşleşmesi bulunamadı. Kaynak belirsizse yönetici onayı gerekir.`);
-        }
+        if(!m.hukOkul||!m.muhOkul)sorunlar.push('İki okul tanımlı değil.');
         const expectedKeys=new Set();
         for(const e of beklenen) {
             if(expectedKeys.has(e.key)) sorunlar.push(`Öğrenci ismi aynı okulda yineleniyor: ${e.ogr}`);
@@ -1581,7 +1593,7 @@
             for(const record of records){
                 const ad=skorEslesmeAnahtari(record?.ad);
                 const matches=timers.filter(timer=>{
-                    if(!timer||timer.bitisNedeni!=='konusma_bitti'||skorEslesmeAnahtari(timer.ogrenci)!==ad)return false;
+                    if(!timer||!['konusma_bitti','sure_doldu'].includes(timer.bitisNedeni)||skorEslesmeAnahtari(timer.ogrenci)!==ad)return false;
                     const timerSide=timer.taraf==='HÜKÜMET'?'huk':timer.taraf==='MUHALEFET'?'muh':'';
                     if(timerSide)return timerSide===taraf;
                     return skorEslesmeAnahtari(timer.okul)===skorEslesmeAnahtari(okulKaynak);
