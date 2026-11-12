@@ -86,7 +86,7 @@
                 ogrenciPuanlari[temizIsim].sayac += 1;
                 const gk = ogrenciGrupKimligi(v);
                 if(!juriGruplari[gk]) juriGruplari[gk] = { macId:mid, mac:ml, okul:secim.okul||'-', ogrenci:ogrKisa, juriler:new Set(), toplam:0, sayac:0 };
-                if(secim.juri) juriGruplari[gk].juriler.add(secim.juri);
+                if(secim.juri) juriGruplari[gk].juriler.add(juriPuanlayiciKimligi(secim));
                 juriGruplari[gk].toplam += toplamPuan;
                 juriGruplari[gk].sayac += 1;
             }
@@ -107,12 +107,12 @@
         const schoolBoard=document.getElementById('school-leaderboard');
         if(siraliOkullar.length){schoolBoard.innerHTML=''; siraliOkullar.forEach((x,i)=>schoolBoard.innerHTML += `<div class="summary-row"><span class="summary-name">${i+1}. ${htmlEscape(x.isim)}</span><span class="summary-score">${x.toplam} Puan</span></div>`);} else schoolBoard.innerHTML='Veri yok.';
         const juriRows=Object.values(juriGruplari).sort((a,b)=>(a.mac+a.okul+a.ogrenci).localeCompare(b.mac+b.okul+b.ogrenci,'tr'));
-        const tamSayisi=juriRows.filter(x=>BEKLENEN_JURILER.every(j=>x.juriler.has(j))).length;
+        const tamSayisi=juriRows.filter(x=>x.juriler.size===3).length;
         const eksikSayisi=juriRows.length-tamSayisi;
         const metrics=document.getElementById('adminMetrics');
         if(metrics) metrics.innerHTML=`<div class="admin-metric"><span>Tekil Puan Kaydı</span><strong>${kayitlar.length}</strong></div><div class="admin-metric"><span>Puanlanan Öğrenci/Maç</span><strong>${juriRows.length}</strong></div><div class="admin-metric"><span>3/3 Jüri Tamam</span><strong>${tamSayisi}</strong></div><div class="admin-metric"><span>Jürisi Eksik</span><strong>${eksikSayisi}</strong></div>`;
         const coverage=document.getElementById('juryCoverage');
-        if(coverage){let html='<table class="tutanak-table"><tr><th>Maç</th><th>Okul</th><th>Öğrenci</th><th>Jüri Durumu</th><th>Eksik Jüri</th><th>Ortalama</th></tr>'; juriRows.forEach(x=>{const eksikler=BEKLENEN_JURILER.filter(j=>!x.juriler.has(j)); const tam=!eksikler.length; const ort=x.sayac?(x.toplam/x.sayac).toFixed(1):'-'; html += `<tr><td>${htmlEscape(x.mac)}</td><td>${htmlEscape(x.okul)}</td><td>${htmlEscape(x.ogrenci)}</td><td class="${tam?'jury-ok':'jury-missing'}">${x.juriler.size}/3</td><td>${tam?'—':htmlEscape(eksikler.join(', '))}</td><td>${ort}</td></tr>`;}); coverage.innerHTML=html+'</table>';}
+        if(coverage){let html='<table class="tutanak-table"><tr><th>Maç</th><th>Okul</th><th>Öğrenci</th><th>Jüri Durumu</th><th>Eksik Değerlendirme</th><th>Ortalama</th></tr>'; juriRows.forEach(x=>{const tam=x.juriler.size===3; const eksikler=tam?'—':(x.juriler.size<3?(3-x.juriler.size)+' jüri değerlendirmesi eksik':x.juriler.size+' değerlendirme var; 3 bekleniyor'); const ort=x.sayac?(x.toplam/x.sayac).toFixed(1):'-'; html += `<tr><td>${htmlEscape(x.mac)}</td><td>${htmlEscape(x.okul)}</td><td>${htmlEscape(x.ogrenci)}</td><td class="${tam?'jury-ok':'jury-missing'}">${x.juriler.size}/3</td><td>${tam?'—':htmlEscape(eksikler)}</td><td>${ort}</td></tr>`;}); coverage.innerHTML=html+'</table>';}
         sonRaporVerisi={kategori:secimler.kategori,kayitlar,juriRows,siraliList,siraliOkullar,maclarMap,resmiFikstur,taslaklar:taslaklar||{}};
         taslakPuanAnaliziniGoster();
         raporGunSecenekleriniDoldur();
@@ -126,13 +126,13 @@
         const kayitlar=[],resmiKimlikler=new Set();
         for(const v of veri.kayitlar||[]){
             const s=v.secim||{};
-            resmiKimlikler.add([kayitMacId(v),s.juri||'',s.okul||'',s.ogr||''].map(x=>puanMetniNormalize(x).toLocaleLowerCase('tr-TR')).join('|'));
+            resmiKimlikler.add(puanKayitKimligi(s,kayitMacId(v)));
         }
         for(const [macId,grup] of Object.entries(veri.taslaklar||{})){
             for(const [kayitId,v] of Object.entries(grup||{})){
                 if(!v||v.durum==='gonderildi')continue;
                 const s=v.secim||{};
-                const kimlik=[macId,s.juri||'',s.okul||'',s.ogr||''].map(x=>puanMetniNormalize(x).toLocaleLowerCase('tr-TR')).join('|');
+                const kimlik=puanKayitKimligi(s,macId);
                 if(resmiKimlikler.has(kimlik))continue;
                 const puanlar=v.puanlar||{};
                 let toplam=0,dolu=0;

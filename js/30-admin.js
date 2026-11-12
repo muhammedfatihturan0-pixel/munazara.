@@ -826,7 +826,7 @@
             if(!taraf)continue;
             const k=key(taraf,(s.ogr||'').split(' (')[0]);
             if(!gruplar.has(k)) gruplar.set(k,new Map());
-            gruplar.get(k).set(s.juri,v);
+            gruplar.get(k).set(juriPuanlayiciKimligi(s),v);
         }
         const beklenen=[];
         const sorunlar=[];
@@ -853,26 +853,32 @@
         const toplamlar={[m.hukOkul]:0,[m.muhOkul]:0};
         for (const e of beklenen) {
             const j=gruplar.get(e.key) || new Map();
-            const fehl=BEKLENEN_JURILER.filter(role=>!j.has(role));
-            fehl.forEach(role=>eksikler.add(role));
-            if(fehl.length) { sorunlar.push(`${e.okul} / ${e.ogr}: eksik ${fehl.join(', ')}`);continue; }
+            if(j.size!==3){
+                const fark=3-j.size;
+                const durum=fark>0?'eksik '+fark+' ayrı jüri değerlendirmesi':'beklenenden fazla ('+j.size+') ayrı jüri değerlendirmesi';
+                sorunlar.push(e.okul+' / '+e.ogr+': '+durum+'.');
+                eksikler.add(durum);
+                continue;
+            }
             let good=true;
-            for(const role of BEKLENEN_JURILER) {
-                const v=j.get(role);
+            for(const [kimlik,v] of j) {
+                if(!BEKLENEN_JURILER.includes(v?.secim?.juri)){
+                    good=false;sorunlar.push(e.okul+' / '+e.ogr+': geçersiz jüri koltuğu.');
+                }
                 if(!krit.every((k,i)=>{const p=Number(v?.puanlar?.[i]??v?.puanlar?.[String(i)]);return Number.isInteger(p)&&p>=1&&p<=k.m;})) {
-                    good=false; sorunlar.push(`${e.okul} / ${e.ogr}: ${role} puanları eksik veya geçersiz.`);
+                    good=false;sorunlar.push(e.okul+' / '+e.ogr+': '+(v?.secim?.juriAd||v?.secim?.juri||kimlik)+' puanları eksik veya geçersiz.');
                 } else toplamlar[e.okul] += puanToplami(v);
             }
             if(good)tam++;
         }
         for(const [k,j] of gruplar) {
             if(!expectedKeys.has(k)) sorunlar.push(`Kayıtlı öğrenci listesinde olmayan puan kaydı: ${k}`);
-            for(const role of j.keys()) if(!BEKLENEN_JURILER.includes(role)) sorunlar.push(`Geçersiz jüri numarası: ${role}`);
+            for(const v of j.values()) if(!BEKLENEN_JURILER.includes(v?.secim?.juri)) sorunlar.push('Geçersiz jüri koltuğu: '+(v?.secim?.juri||'—'));
         }
         // Kadro kayıtları henüz bağlanmamış olsa da gerçekten puanlanan
         // öğrencilerin jüri durumu yöneticiden gizlenmez (0/0 yerine açıklamalı).
         const skorlanan=[...gruplar.values()];
-        const skorlananTam=skorlanan.filter(j=>BEKLENEN_JURILER.every(role=>j.has(role))).length;
+        const skorlananTam=skorlanan.filter(j=>j.size===3).length;
         const ready=beklenen.length>0 && sorunlar.length===0;
         return {ready,toplamlar,tam,eksik:beklenen.length-tam,total:beklenen.length,
             kayitliOgrenci:skorlanan.length,kayitliTam:skorlananTam,

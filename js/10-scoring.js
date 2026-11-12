@@ -702,8 +702,8 @@
         let sonKayitlar=[],sonMac={durum:'acik'},sonucHtml='',sonucSurumu=0;
         const render=()=>{
             const macKayitlari=sonKayitlar.filter(v=>kayitMacId(v)===mac.id),gruplar=new Map();
-            macKayitlari.forEach(v=>{const k=ogrenciGrupKimligi(v);if(!gruplar.has(k))gruplar.set(k,new Set());if(v.secim?.juri)gruplar.get(k).add(v.secim.juri);});
-            const tam=[...gruplar.values()].filter(s=>BEKLENEN_JURILER.every(j=>s.has(j))).length;
+            macKayitlari.forEach(v=>{const k=ogrenciGrupKimligi(v);if(!gruplar.has(k))gruplar.set(k,new Set());if(v.secim?.juri)gruplar.get(k).add(juriPuanlayiciKimligi(v.secim));});
+            const tam=[...gruplar.values()].filter(s=>s.size===3).length;
             let ogrHtml='<span style="color:var(--text-muted);">Öğrenci seçilmedi.</span>';
             if(secimler.ogr&&secimler.okul){
                 const ogrKisa=secimler.ogr.split(' (')[0],key=[mac.id,secimler.okul,ogrKisa].map(puanMetniNormalize).join('|');
