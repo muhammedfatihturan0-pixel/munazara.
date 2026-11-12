@@ -74,17 +74,18 @@
         const okulPuanlari = {};
         const juriGruplari = {};
         kayitlar.forEach(v => {
-            const mid = kayitMacId(v), ml = kayitMacEtiketi(v);
-            mSet.set(mid, ml);
-            const toplamPuan = puanToplami(v);
-            const secim = v.secim || {};
-            const ogrKisa = (secim.ogr || '').split(' (')[0];
+            const mid=kayitMacId(v),ml=kayitMacEtiketi(v);
+            mSet.set(mid,ml);
+            const toplamPuan=puanToplami(v);
+            const secim=v.secim||{};
+            const macMeta=maclarMap?.[mid]||{};
+            const ogrKisa=macOgrenciAdiniCoz(macMeta,(secim.ogr||'').split(' (')[0]);
             if(secim.ogr) {
                 const temizIsim = ogrKisa + ' (' + (secim.okul || '-') + ')';
                 if(!ogrenciPuanlari[temizIsim]) ogrenciPuanlari[temizIsim] = { skor:0, sayac:0 };
                 ogrenciPuanlari[temizIsim].skor += toplamPuan;
                 ogrenciPuanlari[temizIsim].sayac += 1;
-                const gk = ogrenciGrupKimligi(v);
+                const gk = ogrenciGrupKimligi(v,macMeta);
                 if(!juriGruplari[gk]) juriGruplari[gk] = { macId:mid, mac:ml, okul:secim.okul||'-', ogrenci:ogrKisa, juriler:new Set(), toplam:0, sayac:0 };
                 if(secim.juri) juriGruplari[gk].juriler.add(juriPuanlayiciKimligi(secim));
                 juriGruplari[gk].toplam += toplamPuan;
