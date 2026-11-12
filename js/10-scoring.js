@@ -699,14 +699,27 @@ ${juriHtml}
         const mac=mevcutMacBilgisi();if(!mac){box.innerHTML='Canlı jüri durumu için iki okulu seçiniz.';return;}
         let sonKayitlar=[],sonMac={durum:'acik'},sonucHtml='',sonucSurumu=0;
         const render=()=>{
+            const macMeta={...(puanlamaMaclar.get(mac.id)||{}),...sonMac,id:mac.id};
             const macKayitlari=sonKayitlar.filter(v=>kayitMacId(v)===mac.id),gruplar=new Map();
-            macKayitlari.forEach(v=>{const k=ogrenciGrupKimligi(v);if(!gruplar.has(k))gruplar.set(k,new Set());if(v.secim?.juri)gruplar.get(k).add(juriPuanlayiciKimligi(v.secim));});
+            macKayitlari.forEach(v=>{
+                const k=ogrenciGrupKimligi(v,macMeta);
+                if(!gruplar.has(k))gruplar.set(k,new Set());
+                if(v.secim?.juri)gruplar.get(k).add(juriPuanlayiciKimligi(v.secim));
+            });
             const tam=[...gruplar.values()].filter(s=>s.size===3).length;
             let ogrHtml='<span style="color:var(--text-muted);">Öğrenci seçilmedi.</span>';
             if(secimler.ogr&&secimler.okul){
-                const ogrKisa=secimler.ogr.split(' (')[0],key=[mac.id,secimler.okul,ogrKisa].map(puanMetniNormalize).join('|');
-                const juriler=gruplar.get(key)||new Set(),eksik=BEKLENEN_JURILER.filter(j=>!juriler.has(j));
-                ogrHtml=`<b>${htmlEscape(ogrKisa)}</b>: <span class="${eksik.length?'jury-missing':'jury-ok'}">${juriler.size}/3 jüri</span>${eksik.length?` · Eksik: ${htmlEscape(eksik.join(', '))}`:' · Tamamlandı'}`;
+                const ogrKisa=macOgrenciAdiniCoz(macMeta,secimler.ogr.split(' (')[0]);
+                const key=[mac.id,secimler.okul,ogrKisa].map(puanMetniNormalize).join('|');
+                const juriler=gruplar.get(key)||new Set();
+                const related=macKayitlari.filter(v=>ogrenciGrupKimligi(v,macMeta)===key);
+                const tamamlayan=[...new Map(related.map(v=>{
+                    const s=v.secim||{};
+                    return [juriPuanlayiciKimligi(s),(s.juriAd||s.juri||'Jüri')+' ('+(s.juri||'')+')'];
+                })).values()];
+                const tamam=juriler.size===3;
+                const durum=tamam?' · Tamamlandı: '+tamamlayan.join(', '):' · '+(3-juriler.size)+' ayrı değerlendirme bekleniyor';
+                ogrHtml=`<b>${htmlEscape(ogrKisa)}</b>: <span class="${tamam?'jury-ok':'jury-missing'}">${juriler.size}/3 değerlendirme</span><small style="display:block;margin-top:3px">${htmlEscape(durum)}</small>`;
                 const timerId=ortakSureKimligi(secimler.okul,ogrKisa),timer=sonMac?.konusmaSayaclari?.[timerId];
                 if(timer)ortakSureBirDakikaUyarisiKontrolEt(timer,secimler.kategori,mac.id,timerId);
             }
