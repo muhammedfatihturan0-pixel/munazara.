@@ -143,8 +143,9 @@
         const kat=secimler.kategori;
         const girilen=prompt('Okulun yeni adını giriniz:',eskiAd);
         if(girilen===null)return;
-        const yeniAd=turkceMetinDuzelt(girilen),key=firebaseKeyTemizle(yeniAd);
-        if(!key||yeniAd!==key)return alert('Okul adı boş olamaz ve Firebase anahtarında geçersiz karakter içeremez (., #, $, /, [, ]).');
+        const girilenAd=turkceMetinDuzelt(girilen),yeniAd=firebaseKeyTemizle(girilenAd);
+        if(!yeniAd)return alert('Okul adı boş olamaz.');
+        if(yeniAd!==girilenAd&&!confirm('Firebase kayıt anahtarında kullanılamayan . # $ / [ ] karakterleri kaldırılacak.\n\nKaydedilecek okul adı: '+yeniAd+'\n\nDevam edilsin mi?'))return;
         if(yeniAd===eskiAd)return;
         if(!confirm(`Okul listesi adı değiştirilecek:\n${eskiAd} → ${yeniAd}\n\nÖğrenciler ve sıraları korunur. Resmî fikstür, maç sonuçları ve eski jüri puanları değiştirilmez. Devam edilsin mi?`))return;
         try{
@@ -180,45 +181,101 @@
     async function ogrenciAdiniDegistir(okulAd,ogrKey,divElement){
         if(!adminYetkiliMi())return alert('Yalnızca Yönetici Modülünden öğrenci adı düzenlenebilir.');
         if(!firebaseBagli||!navigator.onLine)return alert('Öğrenci adı değiştirmek için Firebase bağlantısı gerekli.');
-        const kat=secimler.kategori;
+        const kat=secimler.kategori,norm=skorEslesmeAnahtari;
         try{
-            const ogrRef=db.ref(`okullar/${kat}/${okulAd}/${ogrKey}`);
-            const onceki=(await ogrRef.once('value')).val();
+            const [oSnap,pSnap,mSnap]=await Promise.all([
+                db.ref('okullar/'+kat+'/'+okulAd).once('value'),
+                db.ref('puanlar/'+kat).once('value'),
+                db.ref('maclar/'+kat).once('value')
+            ]);
+            const roster=oSnap.val()||{},onceki=roster[ogrKey];
             if(typeof onceki!=='string')return alert('Öğrenci kaydı bulunamadı; listeyi yenileyin.');
             const girilen=prompt('Öğrencinin yeni ad ve soyadını giriniz:',onceki);
             if(girilen===null)return;
             const yeniAd=turkceMetinDuzelt(girilen);
             if(!yeniAd)return alert('Öğrenci adı boş olamaz.');
-            if(yeniAd===onceki)return;
-            const norm=skorEslesmeAnahtari;
-            const [oSnap,pSnap,mSnap]=await Promise.all([
-                db.ref(`okullar/${kat}/${okulAd}`).once('value'),
-                db.ref('puanlar/'+kat).once('value'),
-                db.ref('maclar/'+kat).once('value')
-            ]);
-            const roster=oSnap.val()||{};
-            if(Object.keys(roster).some(k=>k!==ogrKey&&norm(roster[k])===norm(yeniAd)))return alert('Bu okulda aynı isimde başka bir öğrenci zaten var.');
-            const maclar=mSnap.val()||{};
-            let scored=false;
-            pSnap.forEach(c=>{
-                const v=c.val(),s=v?.secim||{};
-                if(norm((s.ogr||'').split(' (')[0])!==norm(onceki))return;
-                const m=maclar[kayitMacId(v)]||{};
-                const taraf=s.taraf==='HÜKÜMET'?'huk':s.taraf==='MUHALEFET'?'muh':'';
-                const kaynak=m.ogrenciKaynaklari?.[taraf]||(taraf==='huk'?m.hukOkul:m.muhOkul)||s.okul;
-                if(norm(kaynak)===norm(okulAd)||norm(s.okul)===norm(okulAd))scored=true;
+            if(norm(yeniAd)===norm(onceki))return;
+            if(Object.keys(roster).some(k=>k!==ogrKey&&norm(roster[k])===norm(yeniAd)))
+                return alert('Bu okulda aynı isimde başka bir öğrenci zaten var.');
+            const maclar=mSnap.val()||{},schoolKey=norm(okulAd),relatedMatches=new Set();
+            Object.entries(maclar).forEach(([mid,m])=>{
+                if(norm(m?.ogrenciKaynaklari?.huk||m?.hukOkul)===schoolKey||
+                   norm(m?.ogrenciKaynaklari?.muh||m?.muhOkul)===schoolKey)relatedMatches.add(mid);
             });
-            if(scored)return alert('Bu öğrenciye ait jüri puanı bulundu. Tamamlanmış puanların kimliğini ve 3/3 jüri eşleşmesini bozmamak için ad değişikliği durduruldu. Puanlanmış kayıtlar için ayrıca kontrollü veri düzeltmesi gerekir.');
-            let hata='';
-            const result=await db.ref(`okullar/${kat}/${okulAd}`).transaction(cur=>{
-                if(!cur||cur[ogrKey]!==onceki){hata='Öğrenci başka cihazda güncellendi.';return;}
-                if(Object.keys(cur).some(k=>k!==ogrKey&&norm(cur[k])===norm(yeniAd))){hata='Aynı isimde öğrenci mevcut.';return;}
-                cur[ogrKey]=yeniAd;return cur;
-            },undefined,false);
-            if(!result.committed)return alert('Ad değiştirilemedi. '+(hata||'Lütfen yeniden deneyin.'));
+            const scoreMoves=[];
+            pSnap.forEach(ch=>{
+                const v=ch.val(),s=v?.secim||{};
+                if(!v?.puanlar||!s.ogr)return;
+                const mid=kayitMacId(v),m=maclar[mid]||{};
+                const side=s.taraf==='HÜKÜMET'?'huk':s.taraf==='MUHALEFET'?'muh':
+                    (norm(s.okul)===norm(m.hukOkul)?'huk':norm(s.okul)===norm(m.muhOkul)?'muh':'');
+                const source=side?(m.ogrenciKaynaklari?.[side]||(side==='huk'?m.hukOkul:m.muhOkul)):'';
+                const belongs=norm(source)===schoolKey||norm(s.okul)===schoolKey;
+                const label=String(s.ogr||''),bare=label.split(' (')[0].trim();
+                if(!belongs||norm(bare)!==norm(onceki))return;
+                const nextSecim={...s,ogr:yeniAd+label.slice(bare.length)};
+                scoreMoves.push({mid,oldKey:ch.key,newKey:puanKayitKimligi(nextSecim,mid),
+                    record:{...v,secim:nextSecim,previousStudentName:onceki,studentNameUpdatedAt:Date.now()}});
+                relatedMatches.add(mid);
+            });
+            const draftSnaps=await Promise.all([...relatedMatches].map(mid=>
+                db.ref('puanTaslaklari/'+kat+'/'+mid).once('value').then(s=>({mid,snap:s}))
+            ));
+            const draftMoves=[];
+            for(const {mid,snap} of draftSnaps){
+                const m=maclar[mid]||{};
+                snap.forEach(ch=>{
+                    const v=ch.val(),s=v?.secim||{};
+                    if(!v?.puanlar||!s.ogr)return;
+                    const side=s.taraf==='HÜKÜMET'?'huk':s.taraf==='MUHALEFET'?'muh':'';
+                    const source=side?(m.ogrenciKaynaklari?.[side]||(side==='huk'?m.hukOkul:m.muhOkul)):'';
+                    if(norm(source)!==schoolKey&&norm(s.okul)!==schoolKey)return;
+                    const label=String(s.ogr||''),bare=label.split(' (')[0].trim();
+                    if(norm(bare)!==norm(onceki))return;
+                    const nextSecim={...s,ogr:yeniAd+label.slice(bare.length)};
+                    draftMoves.push({mid,oldKey:ch.key,newKey:puanKayitKimligi(nextSecim,mid),
+                        record:{...v,secim:nextSecim,previousStudentName:onceki,studentNameUpdatedAt:Date.now()}});
+                });
+            }
+            const scoreNewKeys=new Set();
+            for(const x of scoreMoves){
+                if(scoreNewKeys.has(x.newKey))return alert('Ad değişikliği durduruldu: yeni puan kimliği çakışıyor. Hiçbir veri değiştirilmedi.');
+                scoreNewKeys.add(x.newKey);
+                if(x.newKey!==x.oldKey&&pSnap.child(x.newKey).exists())
+                    return alert('Ad değişikliği durduruldu: yeni öğrenci kimliğinde zaten puan kaydı var. Hiçbir veri değiştirilmedi.');
+            }
+            const draftNewKeys=new Set();
+            for(const x of draftMoves){
+                const key=x.mid+'|'+x.newKey;
+                if(draftNewKeys.has(key))return alert('Ad değişikliği durduruldu: yeni taslak kimliği çakışıyor. Hiçbir veri değiştirilmedi.');
+                draftNewKeys.add(key);
+                const snap=draftSnaps.find(y=>y.mid===x.mid)?.snap;
+                if(x.newKey!==x.oldKey&&snap?.child(x.newKey).exists())
+                    return alert('Ad değişikliği durduruldu: yeni öğrenci kimliğinde zaten bulut taslağı var. Hiçbir veri değiştirilmedi.');
+            }
+            const updates={};
+            updates['okullar/'+kat+'/'+okulAd+'/'+ogrKey]=yeniAd;
+            for(const x of scoreMoves){
+                updates['puanlar/'+kat+'/'+x.newKey]=x.record;
+                if(x.newKey!==x.oldKey)updates['puanlar/'+kat+'/'+x.oldKey]=null;
+            }
+            for(const x of draftMoves){
+                updates['puanTaslaklari/'+kat+'/'+x.mid+'/'+x.newKey]=x.record;
+                if(x.newKey!==x.oldKey)updates['puanTaslaklari/'+kat+'/'+x.mid+'/'+x.oldKey]=null;
+            }
+            const aliasKey=macOgrenciAliasAnahtari(onceki);
+            for(const mid of relatedMatches)
+                updates['maclar/'+kat+'/'+mid+'/ogrenciAdEslemeleri/'+aliasKey]=yeniAd;
+            await db.ref().update(updates);
             ogrenciListesiniDoldur(okulAd,divElement);
-            alert('Öğrenci adı güncellendi. Öğrenci sırası, fikstür ve jüri kayıtları korunmuştur.');
-        }catch(err){alert('Öğrenci adı değiştirilemedi: '+(err?.message||err));}
+            alert('Öğrenci adı güncellendi.\n\nTaşınan resmî jüri puanı: '+scoreMoves.length+
+                '\nTaşınan bulut taslağı: '+draftMoves.length+
+                '\nEski işlem günlükleri ve çevrimdışı kayıtlar yeni adla eşleştirilecek.\n'+
+                'Fikstür ve kesinleşmiş maç sonuçları değiştirilmedi.');
+        }catch(err){
+            console.error('Öğrenci adı güncelleme hatası:',err);
+            alert('Öğrenci adı değiştirilemedi: '+(err?.message||err));
+        }
     }
 
     // Yalnızca yönetici alanında, resmî maçla öğrenci listesi kaynağını ilişkilendirir.
