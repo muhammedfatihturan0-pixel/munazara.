@@ -1,5 +1,5 @@
 
-    const APP_VERSION = '3.50 · Öğretmen Bazlı Jüri Kaydı';
+    const APP_VERSION = '3.51 · Jüri Kimliği ve Puan Kurtarma';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -131,7 +131,8 @@
         const s=secimObj?.secim||secimObj||{};
         const rol=puanMetniNormalize(s.juri||'').replace(/\s+/g,' ').toLocaleLowerCase('tr-TR');
         const ad=puanMetniNormalize(s.juriAd||'').replace(/\s+/g,' ').toLocaleLowerCase('tr-TR');
-        return rol+'|'+(ad||'rol:'+rol);
+        const fallback=puanMetniNormalize(s.juriOturumId||s.oturumId||s.juriClientId||s.clientId||'');
+        return rol+'|'+(ad||(fallback?'oturum:'+fallback:'kimlik-eksik'));
     }
     function puanKayitKimligi(secimObj, macId) {
         const s = secimObj || {};
@@ -176,9 +177,31 @@
         return Array.from(map.values());
     }
 
-    function ogrenciGrupKimligi(v) {
-        const s = v.secim || {};
-        return [kayitMacId(v), s.okul || '', (s.ogr || '').split(' (')[0]].map(puanMetniNormalize).join('|');
+    function macOgrenciAliasAnahtari(ad){
+        const key=puanMetniNormalize(ad).replace(/\s+/g,' ').toLocaleLowerCase('tr-TR');
+        return 'a_'+hash32(key,2166136261)+hash32(key,3339675911);
+    }
+    function macOgrenciAdiniCoz(mac,ad){
+        let current=puanMetniNormalize(ad),aliases=mac?.ogrenciAdEslemeleri||{};
+        const seen=new Set();
+        for(let i=0;i<12&&current;i++){
+            const key=macOgrenciAliasAnahtari(current);
+            if(seen.has(key))break;
+            seen.add(key);
+            const next=puanMetniNormalize(aliases[key]||'');
+            if(!next||next===current)break;
+            current=next;
+        }
+        return current;
+    }
+    function macOgrenciEtiketiniCoz(mac,etiket){
+        const raw=puanMetniNormalize(etiket),m=raw.match(/^(.*?)(\s+\([^()]*\))?$/);
+        return m?macOgrenciAdiniCoz(mac,m[1])+String(m[2]||''):macOgrenciAdiniCoz(mac,raw);
+    }
+    function ogrenciGrupKimligi(v,mac=null) {
+        const s=v?.secim||{};
+        const ogr=macOgrenciAdiniCoz(mac,(s.ogr||'').split(' (')[0]);
+        return [kayitMacId(v),s.okul||'',ogr].map(puanMetniNormalize).join('|');
     }
 
     function secimleriKaydet() {
@@ -661,7 +684,7 @@
         puanFirebaseAnlikDurum=kayit;
         try{
             localStorage.setItem(PUAN_FIREBASE_DURUM_KEY,JSON.stringify(kayit));
-            puanBildirimKaydiniEkle(kayit);
+            if(adminYetkiliMi())puanBildirimKaydiniEkle(kayit);
         }catch(err){console.warn('Son puan gönderim/bildirim durumu cihazda saklanamadı:',err);}
         puanFirebaseDurumuGoster();
         void juriCihazDurumunuGuncelle();
@@ -765,11 +788,12 @@
         puanGuvenceModaliniAc('Merkezi Bildirimler','<div class="bildirim-empty">Jüri tabletlerinden gelen kayıtlar yükleniyor…</div>');
         const rows=await adminPuanBildirimleriniYukle();
         if(!adminYetkiliMi()||!document.getElementById('puanGuvenceModal'))return;
-        const latest=rows.slice(0,30);
+        const latest=rows.slice(0,60);
         const pending=latest.filter(x=>x.puanGonderildi!==true&&(x.puanKuyrugaAlindi===true||String(x.durum||'').includes('baslatildi')||String(x.durum||'').includes('kuyruk')||String(x.durum||'').includes('hata')));
         const body='<section class="bildirim-summary bildirim-'+(pending.length?'warning':'neutral')+'"><span class="bildirim-summary-icon">'+(pending.length?'!':'i')+'</span><div><strong>'+
-            (pending.length?pending.length+' bekleyen / kontrol gerektiren işlem':'Son 30 işlemde bekleyen durum yok')+
-            '</strong><p>Bu liste iki kategorideki jüri tabletlerinin Firebase denetim kayıtlarından oluşturulur.</p></div></section>'+
+            (pending.length?pending.length+' bekleyen / kontrol gerektiren işlem':'Son 60 işlemde bekleyen durum yok')+
+            '</strong><p>Son 60 işlem gösteriliyor; iki kategoride toplam '+rows.length+' merkezi jüri kaydı var. Bu merkez yalnızca yönetici oturumunda açılır.</p></div></section>'+
+            '<div class="bildirim-section-head"><h3>Son jüri işlemleri</h3><span>'+latest.length+' / '+rows.length+'</span></div>'+
             (latest.length?latest.map(adminPuanBildirimKartiniHtml).join(''):'<div class="bildirim-empty">Henüz merkezi jüri puan bildirimi bulunmuyor.</div>')+
             '<p class="bildirim-disclaimer">Bu panel yönetici oturumu dışında açılmaz. Jüri tabletlerinde merkezi bildirim listesi gösterilmez.</p>';
         puanGuvenceModaliniAc('Merkezi Bildirimler ('+rows.length+')',body);
@@ -1500,13 +1524,9 @@
                         <h1>Yönetici Paneli</h1>
                         <p>Turnuva yönetimi, maç planlama, jüri ve puan işlemleri.</p>
                     </div>
-                    <div class="admin-dashboard-head-note">🔔 Bildirimler sağ üstteki zil menüsünde</div>
+                    <div class="admin-dashboard-head-note">Jüri gönderim geçmişi ve bekleyen kayıtlar üst menüdeki 🔔 Bildirimler alanında.</div>
                 </header>
 
-                <section class="admin-dashboard-group" style="margin:0 0 16px;">
-                    <header><span class="admin-group-icon">🔔</span><div><h2>Merkezi Jüri Bildirimleri</h2><p>Her iki kategorideki jüri tabletlerinin puan gönderim durumları</p></div></header>
-                    <div id="adminGlobalPuanBildirimleri"><div class="bildirim-empty">Jüri işlem kayıtları yükleniyor…</div></div>
-                </section>
                 <div class="admin-dashboard-groups">
                     <section class="admin-dashboard-group group-tournament">
                         <header><span class="admin-group-icon">🏆</span><div><h2>Turnuva Planlama</h2><p>Maçların ve resmî takvimin yönetimi</p></div></header>
