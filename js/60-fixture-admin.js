@@ -632,7 +632,7 @@
                 bell.type='button';bell.className='admin-global-notification';
                 bell.onclick=()=>bildirimMerkeziniAc();
                 bell.title='Puan gönderim bildirimleri ve bekleyen kayıtlar';
-                nav.appendChild(bell);
+                nav.insertBefore(bell,nav.firstChild);
             }
             const unread=typeof adminPuanBildirimOkunmamisSayisi==='function'?adminPuanBildirimOkunmamisSayisi():0;
             const badge=unread;
