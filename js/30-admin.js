@@ -824,7 +824,7 @@
             const s=v.secim||{};
             const taraf=puanKaydiTarafiniBul(v,m);
             if(!taraf)continue;
-            const k=key(taraf,(s.ogr||'').split(' (')[0]);
+            const k=key(taraf,macOgrenciAdiniCoz(m,(s.ogr||'').split(' (')[0]));
             if(!gruplar.has(k)) gruplar.set(k,new Map());
             gruplar.get(k).set(juriPuanlayiciKimligi(s),v);
         }
@@ -835,8 +835,11 @@
             // Bu maçın katılımcıları, bu maça ait jüri puan kayıtlarından otomatik belirlenir.
             // Okulun güncel ana listesindeki sonradan ekleme/silme veya okul adı kısaltması
             // geçmiş maçın puanlarını geçersiz kılamaz.
-            const puanlanan=[...new Set(secimlerMac.filter(v=>puanKaydiTarafiniBul(v,m)===taraf)
-                .map(v=>(v.secim?.ogr||'').split(' (')[0].trim()).filter(Boolean))];
+            const puanlanan=[...new Map(secimlerMac.filter(v=>puanKaydiTarafiniBul(v,m)===taraf)
+                .map(v=>{
+                    const ad=macOgrenciAdiniCoz(m,(v.secim?.ogr||'').split(' (')[0].trim());
+                    return [skorEslesmeAnahtari(ad),ad];
+                }).filter(([k,ad])=>k&&ad)).values()];
             if(puanlanan.length!==3)
                 sorunlar.push(okul+': Bu maçta puan kaydı bulunan '+puanlanan.length+' farklı öğrenci var; her takım için 3 konuşmacı bekleniyor.');
             for(const ogr of puanlanan)beklenen.push({okul,ogr,key:key(taraf,ogr)});
@@ -1122,7 +1125,7 @@
                 istisnalar+=but('⏱ Süreleri Gör / Düzelt',`sureModalAc(${f})`,'#0369a1',kap && !sureKapanmisMacKaydiIzni(r.m));
                 if(!kap){
                     if(!r.ready&&r.m.hukOkul&&r.m.muhOkul)
-                        istisnalar+=but('🛟 Bulut Taslaklarını Tara / Kurtar',`yoneticiEksikJuriTaslaklariniKurtar('${secimler.kategori}','${r.id}')`,'#a16207');
+                        istisnalar+=but('🛟 İşlem günlüğü / taslaklardan puan kurtar',`yoneticiEksikJuriTaslaklariniKurtar('${secimler.kategori}','${r.id}')`,'#a16207');
 
                     istisnalar+=but('✏ Resmî Puanı Manuel Onayla',`yoneticiManuelSonucEkraniAc(${f})`,'#0f766e');
                     istisnalar+=but('⚖ Hükmen Sonuç',`macHukmenKapat(${f})`,'#a16207');
@@ -1131,6 +1134,8 @@
                     istisnalar+=but('✕ Maçı İptal Et',`macIptaliniDegistir(${f},true)`,'#475569');
                     if(!r.m._sanal)istisnalar+=but('🗑 Maç Kaydını Sil',`yoneticiMacKaydiniSil(${f})`,'#7f1d1d');
                 }else{
+                    if(!r.ready&&r.m.hukOkul&&r.m.muhOkul)
+                        istisnalar+=but('🛟 Eksik jüri puanlarını günlüklerden kurtar',`yoneticiEksikJuriTaslaklariniKurtar('${secimler.kategori}','${r.id}')`,'#a16207');
                     istisnalar+=but('↩ Yeniden Aç (Sonucu Geri Al)',`macDurumuDegistir(${f},'acik')`,'#0f766e');
                     istisnalar+=but('🔗 Fikstürle Manuel Eşleştir',`yoneticiFiksturSonucEslestirEkraniAc(${f})`,'#0f766e');
                 }
@@ -1154,139 +1159,135 @@
     }
 
     async function yoneticiEksikJuriTaslaklariniKurtar(kategori,macId){
-      if(!adminYetkiliMi()||!navigator.onLine||!firebaseBagli)return alert('Bulut taslaklarını kontrol etmek için çevrimiçi yönetici girişi gerekir.');
-      const lock='taslak-kurtarma|'+kategori+'|'+macId;
+      if(!adminYetkiliMi()||!navigator.onLine||!firebaseBagli)
+        return alert('Eksik jüri puanlarını kurtarmak için çevrimiçi yönetici girişi gerekir.');
+      const lock='juri-puan-kurtarma|'+kategori+'|'+macId;
       if(aktifSonucIslemleri.has(lock))return;
       aktifSonucIslemleri.add(lock);
       try{
         const mac=await yoneticiMaciniHazirla(kategori,macId);
-        if(!mac||!mac.hukOkul||!mac.muhOkul)throw new Error('Maçın iki okul bilgisi doğrulanamadı.');
-        const res=await Promise.all([
+        if(!mac?.hukOkul||!mac?.muhOkul)throw new Error('Maçın iki okul bilgisi doğrulanamadı.');
+        const [oSnap,pSnap,dSnap,aSnap]=await Promise.all([
           db.ref('okullar/'+kategori).once('value'),
-          db.ref('puanlar/'+kategori).once('value')
+          db.ref('puanlar/'+kategori).once('value'),
+          db.ref('puanTaslaklari/'+kategori+'/'+macId).once('value'),
+          db.ref('arsiv/juriSureOlaylari/'+kategori).once('value')
         ]);
-        const okullar=puanlamaRosteriGetir(res[0]);
-        const mevcut={};
-        res[1].forEach(function(c){
-          const v=c.val();
-          if(v&&v.secim&&v.puanlar)mevcut[puanKayitKimligi(v.secim,kayitMacId(v))]=v;
+        const okullar=puanlamaRosteriGetir(oSnap),mevcut={};
+        pSnap.forEach(ch=>{
+          const v=ch.val();
+          if(v?.secim&&v?.puanlar)mevcut[puanKayitKimligi(v.secim,kayitMacId(v))]=true;
         });
-        const taraflar=[
-          {taraf:'huk',label:'HÜKÜMET',okul:mac.hukOkul},
-          {taraf:'muh',label:'MUHALEFET',okul:mac.muhOkul}
-        ];
-        const roller=['1. Jüri','2. Jüri','3. Jüri'];
-        const adaylar=[],kismi=[];
-        for(const taraf of taraflar){
-          const kaynak=guvenliKadroKaynagiBul(okullar,mac,taraf.taraf,[]);
-          if(!kaynak||!okullar[kaynak]||!okullar[kaynak].length)
-            throw new Error(taraf.okul+' için öğrenci listesi tekil ve güvenli biçimde eşleştirilemedi.');
-          const ogrenciler=okullar[kaynak];
-          for(let i=0;i<ogrenciler.length;i++){
-            const ad=String(ogrenciler[i]||'').trim();
-            if(!ad)continue;
-            const konusmaci=i<3?(i+1)+'. Konuşmacı':'Grup Sözcüsü';
-            const ogrEtiketi=ad+' ('+konusmaci+')';
-            for(const juri of roller){
-              const secim={
-                kategori:kategori,macId:macId,hukOkul:mac.hukOkul,muhOkul:mac.muhOkul,
-                juri:juri,okul:taraf.okul,ogr:ogrEtiketi,taraf:taraf.label
-              };
-              const kayitId=puanKayitKimligi(secim,macId);
-              if(mevcut[kayitId])continue;
-              const taslakRef=db.ref('puanTaslaklari/'+kategori+'/'+macId+'/'+kayitId);
-              const taslakSnap=await taslakRef.once('value');
-              const taslak=taslakSnap.val();
-              if(!taslak||!taslak.puanlar)continue;
-              const ks=taslak.secim||{};
-              const dogruKimlik=
-                String(taslak.macId||'')===String(macId)&&
-                String(ks.kategori||'')===String(kategori)&&
-                String(ks.juri||'')===juri&&
-                skorEslesmeAnahtari(ks.okul)===skorEslesmeAnahtari(taraf.okul)&&
-                skorEslesmeAnahtari(ks.ogr)===skorEslesmeAnahtari(ogrEtiketi)&&
-                String(ks.taraf||'')===taraf.label&&
-                skorEslesmeAnahtari(ks.hukOkul)===skorEslesmeAnahtari(mac.hukOkul)&&
-                skorEslesmeAnahtari(ks.muhOkul)===skorEslesmeAnahtari(mac.muhOkul)&&
-                !!ks.juriAd;
-              const puanlarTam=krit.every(function(k,index){
-                const p=Number(taslak.puanlar[index]!==undefined?taslak.puanlar[index]:taslak.puanlar[String(index)]);
-                return Number.isInteger(p)&&p>=1&&p<=k.m;
-              });
-              if(!dogruKimlik){kismi.push(ad+' · '+juri+' (kimlik eşleşmedi)');continue;}
-              if(!puanlarTam){kismi.push(ad+' · '+juri+' ('+Object.keys(taslak.puanlar||{}).length+'/13)');continue;}
-              adaylar.push({kayitId,taslakRef,taslak,secim:ks,ogr:ad,juri,taraf:taraf.label});
-            }
-          }
-        }
-        if(!adaylar.length){
-          const mesaj=kismi.length
-            ?'Tam 13/13 kriterli ve kimliği doğrulanmış bulut taslağı bulunamadı. '+kismi.length+' kısmi/uyuşmayan taslak bulundu; bunlar resmî puanlara aktarılmadı.'
-            :'Eksik kayıtlar için Firebase’de bulut taslağı bulunamadı. Hiçbir puan eklenmedi.';
-          return alert(mesaj+' Mevcut maç sonucu ve kazanan değiştirilmedi.');
-        }
-        const liste=adaylar.map(function(x){return '• '+x.juri+' · '+x.ogr+' · '+x.taraf;}).join('\n');
-        const onay=confirm(
-          'TAMAMLANMIŞ BULUT TASLAKLARINI KURTAR\n\n'+
-          adaylar.length+' adet 13/13 kriterli taslak bulundu:\n'+liste+'\n\n'+
-          'Yalnızca resmî puan kaydı olmayan anahtarlar oluşturulacak. Mevcut puanlar üzerine yazılmayacak. '+
-          'Maçın kapalı/açık durumu, kesinleşmiş sonucu ve kazanan alanına dokunulmayacak.\n\nAktarılsın mı?'
-        );
-        if(!onay)return;
+        const tarafBilgisi=(tarafRaw,okulRaw)=>{
+          const t=String(tarafRaw||'').toLocaleUpperCase('tr-TR');
+          if(t==='HÜKÜMET'||t==='HUKUMET'||t==='HUK')return {taraf:'huk',label:'HÜKÜMET',okul:mac.hukOkul};
+          if(t==='MUHALEFET'||t==='MUH')return {taraf:'muh',label:'MUHALEFET',okul:mac.muhOkul};
+          const okul=skorEslesmeAnahtari(okulRaw);
+          if(okul&&(okul===skorEslesmeAnahtari(mac.hukOkul)||okul===skorEslesmeAnahtari(mac.ogrenciKaynaklari?.huk)))
+            return {taraf:'huk',label:'HÜKÜMET',okul:mac.hukOkul};
+          if(okul&&(okul===skorEslesmeAnahtari(mac.muhOkul)||okul===skorEslesmeAnahtari(mac.ogrenciKaynaklari?.muh)))
+            return {taraf:'muh',label:'MUHALEFET',okul:mac.muhOkul};
+          return null;
+        };
+        const rosterEtiketi=(bare,side)=>{
+          const canonical=macOgrenciAdiniCoz(mac,bare);
+          const source=guvenliKadroKaynagiBul(okullar,mac,side.taraf,[]);
+          if(!source||!okullar[source]?.length)return '';
+          const idx=okullar[source].findIndex(x=>skorEslesmeAnahtari(macOgrenciAdiniCoz(mac,x))===skorEslesmeAnahtari(canonical));
+          return idx<0?'':canonical+' ('+(idx<3?(idx+1)+'. Konuşmacı':'Grup Sözcüsü')+')';
+        };
+        const validScores=raw=>{
+          const p=Array.isArray(raw)?Object.fromEntries(raw.map((x,i)=>[String(i),x])):(raw||{});
+          return krit.every((k,i)=>{
+            const n=Number(p[i]??p[String(i)]);
+            return Number.isInteger(n)&&n>=1&&n<=k.m;
+          })?p:null;
+        };
+        const adaylar=new Map(),kismi=[];
+        const add=(secim,raw,source,sourceRef=null,sourceRecord=null,stamp=0)=>{
+          const puanlar=validScores(raw);
+          if(!puanlar){kismi.push((secim?.juriAd||secim?.juri||'Jüri')+' · '+(secim?.ogr||'Öğrenci')+' ('+source+', 13 kriter tam değil)');return;}
+          const kayitId=puanKayitKimligi(secim,macId);
+          if(mevcut[kayitId])return;
+          const onceki=adaylar.get(kayitId);
+          if(onceki&&Number(onceki.stamp||0)>=Number(stamp||0))return;
+          const record={
+            secim:{...secim},puanlar,macId,mac:macEskiEtiketi(mac.hukOkul,mac.muhOkul),
+            macEtiketi:mac.etiket||macEtiketi(mac.hukOkul,mac.muhOkul),
+            clientId:secim.juriClientId||sourceRecord?.clientId||sourceRecord?.cihazId||'',
+            createdAt:Number(stamp||sourceRecord?.createdAt||Date.now()),
+            localUpdatedAt:Number(stamp||sourceRecord?.localUpdatedAt||Date.now()),
+            updatedAt:firebase.database.ServerValue.TIMESTAMP,queuedOffline:false,
+            recoveredFromScoreEvidence:true,recoverySource:source
+          };
+          adaylar.set(kayitId,{kayitId,record,source,sourceRef,sourceRecord,stamp});
+        };
+        aSnap.forEach(ch=>{
+          const e=ch.val()||{};
+          if(String(e.macId||'')!==String(macId)||e.islem!=='puan_kayit_aktarimi'||
+             !String(e.durum||'').startsWith('puanlar_gonderildi')||e.puanGonderildi!==true)return;
+          const side=tarafBilgisi(e.taraf,e.okul);
+          const juri=String(e.juri||'').trim(),juriAd=String(e.juriAd||'').trim();
+          const bare=String(e.ogrenci||e.secim?.ogr||'').split(' (')[0].trim();
+          if(!side||!BEKLENEN_JURILER.includes(juri)||!juriAd||!bare)return;
+          const ogr=rosterEtiketi(bare,side);
+          if(!ogr){kismi.push(juriAd+' ('+juri+') · '+bare+' (öğrenci listesiyle eşleşmedi)');return;}
+          const secim={kategori,macId,hukOkul:mac.hukOkul,muhOkul:mac.muhOkul,juri,juriAd,okul:side.okul,ogr,taraf:side.label};
+          const stamp=Number(e.puanGonderildiAt||e.puanGondermeAniClient||e.updatedAt||e.createdAt||e.clientAt||0);
+          add(secim,e.puanVerisi||e.puanlar,'Başarılı jüri işlem günlüğü',null,{...e,logId:ch.key},stamp);
+        });
+        dSnap.forEach(ch=>{
+          const draft=ch.val()||{},s=draft.secim||{};
+          if(!draft.puanlar||draft.durum==='gonderildi'||String(draft.macId||macId)!==String(macId))return;
+          const side=tarafBilgisi(s.taraf,s.okul);
+          const juri=String(s.juri||'').trim(),juriAd=String(s.juriAd||'').trim();
+          if(!side||!BEKLENEN_JURILER.includes(juri)||!juriAd||!s.ogr)return;
+          const bare=String(s.ogr).split(' (')[0].trim(),ogr=rosterEtiketi(bare,side);
+          if(!ogr){kismi.push(juriAd+' ('+juri+') · '+bare+' (taslak öğrenci listesiyle eşleşmedi)');return;}
+          const secim={...s,kategori,macId,hukOkul:mac.hukOkul,muhOkul:mac.muhOkul,juri,juriAd,okul:side.okul,ogr,taraf:side.label};
+          add(secim,draft.puanlar,'Firebase bulut taslağı',
+            db.ref('puanTaslaklari/'+kategori+'/'+macId+'/'+ch.key),draft,
+            Number(draft.localUpdatedAt||draft.updatedAt||0));
+        });
+        const rows=[...adaylar.values()];
+        if(!rows.length)return alert('Yeni ve 13/13 doğrulanabilir kurtarma kaydı bulunamadı.\n'+
+          (kismi.length?'İnceleme gerektiren kayıt: '+kismi.length+'\n'+kismi.slice(0,10).join('\n'):'')+
+          '\nMevcut puanlar, maç durumu ve kesinleşmiş sonuç değiştirilmedi.');
+        const list=rows.map(x=>'• '+x.record.secim.juriAd+' ('+x.record.secim.juri+') · '+x.record.secim.ogr+' · '+x.source).join('\n');
+        if(!confirm('EKSİK JÜRİ PUANLARINI KURTAR\n\n'+rows.length+' yeni 13/13 değerlendirme bulundu:\n'+list+
+          '\n\nYalnızca eksik öğretmen değerlendirmeleri eklenecek. Var olan kayıtların üzerine yazılmayacak. '+
+          'Maçın açık/kapalı durumu, resmî sonucu ve kazanan alanı değiştirilmeyecek.\n\nAktarılsın mı?'))return;
         let restored=0,already=0,failed=0;
-        for(const item of adaylar){
-          const officialRef=db.ref('puanlar/'+kategori+'/'+item.kayitId);
+        for(const item of rows){
           try{
-            const recovered={
-              ...item.taslak,
-              secim:{...item.secim},
-              macId:macId,
-              mac:macEskiEtiketi(mac.hukOkul,mac.muhOkul),
-              macEtiketi:mac.etiket||macEtiketi(mac.hukOkul,mac.muhOkul),
-              queuedOffline:false,
-              recoveredFromCloudDraft:true,
-              recoveredBy:'yonetici',
-              recoveredAt:firebase.database.ServerValue.TIMESTAMP,
-              updatedAt:firebase.database.ServerValue.TIMESTAMP,
-              recoveryNote:'Tam 13/13 Firebase puan taslağından; mevcut maç sonucu değiştirilmeden geri yüklendi.'
-            };
-            const tx=await officialRef.transaction(function(cur){return cur?cur:recovered;},undefined,false);
-            const live=tx.snapshot?tx.snapshot.val():null;
-            if(!tx.committed||!firebasePuanKaydiEslesiyor(live,recovered)){
-              if(live)already++;else failed++;
-              continue;
-            }
+            const ref=db.ref('puanlar/'+kategori+'/'+item.kayitId);
+            const tx=await ref.transaction(cur=>cur?cur:item.record,undefined,false);
+            const live=tx.snapshot?.val()||null;
+            if(!tx.committed){if(live)already++;else failed++;continue;}
+            if(!firebasePuanKaydiEslesiyor(live,item.record)){failed++;continue;}
             restored++;
-            const auditRef=db.ref('arsiv/juriPuanKurtarma/'+kategori+'/'+macId+'/'+item.kayitId);
-            await auditRef.set({
-              islem:'tamamlanmis_bulut_taslagindan_puan_kurtarma',
-              kategori: kategori,macId:macId,kayitId:item.kayitId,
-              juri:item.juri,ogr:item.ogr,taraf:item.taraf,
-              taslak:item.taslak,geriYuklenen:recovered,
-              mevcutMacSonucuKorundu:true,
+            await db.ref('arsiv/juriPuanKurtarma/'+kategori+'/'+macId+'/'+item.kayitId).set({
+              islem:'eksik_juri_degerlendirmesi_kurtarma',kategori,macId,kayitId:item.kayitId,
+              kaynak:item.source,kaynakLogId:item.sourceRecord?.logId||'',
+              juri:item.record.secim.juri,juriAd:item.record.secim.juriAd,
+              okul:item.record.secim.okul,ogr:item.record.secim.ogr,kriterler:item.record.puanlar,
+              geriYuklenen:item.record,mevcutMacSonucuKorundu:true,
               createdAt:firebase.database.ServerValue.TIMESTAMP
-            }).catch(function(e){console.warn('Puan kurtarma denetim kaydı yazılamadı:',e);});
-            await item.taslakRef.transaction(function(cur){
-              if(!cur)return cur;
+            }).catch(err=>console.warn('Kurtarma denetim kaydı yazılamadı:',err));
+            if(item.sourceRef)await item.sourceRef.transaction(cur=>{
+              if(!cur||cur.durum==='gonderildi')return cur;
               return {...cur,durum:'gonderildi',tamamlandiAt:Date.now(),
                 yoneticiTarafindanKurtarildi:true,geriYuklenenKayitId:item.kayitId};
-            },undefined,false).catch(function(e){console.warn('Kurtarılan taslak kapatılamadı:',e);});
-          }catch(err){
-            console.error('Taslak kurtarma kaydı başarısız:',item.kayitId,err);
-            failed++;
-          }
+            },undefined,false).catch(err=>console.warn('Taslak işareti güncellenemedi:',err));
+          }catch(err){console.error('Puan kurtarılamadı:',item.kayitId,err);failed++;}
         }
-        alert(
-          'Kurtarma tamamlandı.\n\n'+
-          'Firebase’e eklenen tam puan kaydı: '+restored+'\n'+
-          'İşlem sırasında zaten var olduğu görülen: '+already+'\n'+
-          'Aktarılamayan: '+failed+'\n\n'+
-          'Mevcut maç sonucu ve kazanan alanı değiştirilmedi.'
-        );
+        alert('Kurtarma tamamlandı.\n\nEklenen ayrı jüri değerlendirmesi: '+restored+
+          '\nZaten mevcut kayıt: '+already+'\nAktarılamayan: '+failed+
+          (kismi.length?'\nİnceleme gerektiren: '+kismi.length+' kayıt':'')+
+          '\n\nMaçın durumu, resmî sonucu ve kazanan alanı değiştirilmedi.');
         if(document.getElementById('liveMatches'))renderYoneticiCanliPanel();
-      }catch(err){
-        alert('Bulut taslağı taraması/kurtarma yapılamadı: '+(err&&err.message||err));
-      }finally{aktifSonucIslemleri.delete(lock);}
+      }catch(err){alert('İşlem günlüğü / bulut taslağı taraması yapılamadı: '+(err?.message||err));}
+      finally{aktifSonucIslemleri.delete(lock);}
     }
 
     async function macHukmenKapat(kategori,macId){
