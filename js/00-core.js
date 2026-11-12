@@ -687,6 +687,8 @@
 
     const PUAN_BILDIRIM_GECMISI_KEY='munazaraPuanBildirimGecmisiV1';
     const PUAN_BILDIRIM_OKUNDU_KEY='munazaraPuanBildirimOkunduAtV1';
+    const ADMIN_PUAN_BILDIRIM_OKUNDU_KEY='munazaraAdminMerkeziPuanBildirimOkunduAtV1';
+    let adminMerkeziPuanBildirimleriCache=[];
     function puanBildirimGecmisiOku(){
         try{const v=JSON.parse(localStorage.getItem(PUAN_BILDIRIM_GECMISI_KEY)||'[]');return Array.isArray(v)?v:[];}
         catch(_){return [];}
@@ -702,39 +704,77 @@
         const readAt=Number(localStorage.getItem(PUAN_BILDIRIM_OKUNDU_KEY)||0);
         return puanBildirimGecmisiOku().filter(x=>Number(x.updatedAt||0)>readAt).length;
     }
-    function bildirimMerkeziniAc(){
-        if(typeof adminYetkiliMi!=='function'||!adminYetkiliMi())return;
-        const q=offlineKuyrukGetir();
-        const pending=Object.entries(q).filter(([,x])=>x&&x.kayit);
-        const durum=puanFirebaseAnlikDurum||puanFirebaseDurumuOku();
-        const rows=puanBildirimGecmisiOku();
-        try{localStorage.setItem(PUAN_BILDIRIM_OKUNDU_KEY,String(Date.now()));}catch(_){}
-        const level=durum?.durum==='success'&&!pending.length?'success':(pending.length||durum?.durum==='error'?'warning':'neutral');
-        const latest=durum?.mesaj
-            ?'<article class="bildirim-item bildirim-'+htmlEscape(durum.durum||'neutral')+'"><div class="bildirim-item-head"><strong>Son işlem</strong><time>'+htmlEscape(puanDurumTarihiYaz(durum.updatedAt))+'</time></div>'+
-                '<p>'+htmlEscape(durum.mesaj)+'</p>'+
-                (durum.juri||durum.ogr?'<small>'+htmlEscape([durum.juri,durum.juriAd,durum.ogr].filter(Boolean).join(' · '))+'</small>':'')+'</article>'
-            :'<div class="bildirim-empty">Bu cihazda henüz bir puan gönderim bildirimi oluşmadı.</div>';
-        const queueHtml=pending.length?pending.map(([key,item])=>{
-            const r=item.kayit||{},s=r.secim||{};
-            const stamp=Number(item.puanGondermeAniClientAt||item.puanGondermeAni||item.queuedAt||r.localUpdatedAt||0);
-            return '<article class="bildirim-item bildirim-warning"><div class="bildirim-item-head"><strong>'+htmlEscape(r.macEtiketi||r.mac||item.macId||'Maç bilgisi yok')+'</strong><span>'+htmlEscape(puanKuyrukDurumMetni(item))+'</span></div>'+
-                '<p><b>Öğrenci:</b> '+htmlEscape(s.ogr||'—')+' · <b>Okul:</b> '+htmlEscape(s.okul||'—')+'</p>'+
-                '<small>'+htmlEscape(item.kategori||'')+' · '+htmlEscape(s.juri||'Jüri bilgisi yok')+' · '+htmlEscape(puanDurumTarihiYaz(stamp))+'</small>'+
-                (item.lastError||item.reddedilmeNedeni?'<p class="bildirim-error">'+htmlEscape(item.lastError||item.reddedilmeNedeni)+'</p>':'')+
-                puanKriterDetayiHtml(r)+'</article>';
-        }).join(''):'<div class="bildirim-empty">Bekleyen puan yok. Cihazın yerel gönderim kuyruğu boş.</div>';
-        const historyHtml=rows.length?rows.slice(0,12).map(x=>
-            '<article class="bildirim-history-row"><span class="bildirim-history-dot durum-'+htmlEscape(x.durum||'neutral')+'"></span><div><strong>'+htmlEscape(x.durum==='success'?'Puan doğrulandı':x.durum==='error'?'Gönderim hatası':x.durum==='queued'?'Puan kuyruğa alındı':'Puan gönderim durumu')+'</strong>'+
-            '<p>'+htmlEscape(x.mesaj||'')+'</p><small>'+htmlEscape(puanDurumTarihiYaz(x.updatedAt))+(x.ogr?' · '+htmlEscape(x.ogr):'')+(x.juri?' · '+htmlEscape(x.juri):'')+'</small></div></article>'
-        ).join(''):'<div class="bildirim-empty">Henüz bildirim geçmişi yok.</div>';
-        const body='<section class="bildirim-summary bildirim-'+level+'"><span class="bildirim-summary-icon">'+(level==='success'?'✓':level==='warning'?'!':'i')+'</span><div><strong>'+(pending.length?pending.length+' puan bekliyor':durum?.durum==='success'?'Son gönderim doğrulandı':'Puan gönderim durumu')+'</strong><p>'+(pending.length?'Bu puanlar Firebase’den doğrulanana kadar resmî kaydedildi sayılmaz.':durum?.mesaj?htmlEscape(durum.mesaj):'Şu anda bekleyen puan bulunmuyor.')+'</p></div></section>'+
-            '<div class="bildirim-section-head"><h3>Bekleyen puanlar</h3><span>'+pending.length+' kayıt</span></div>'+queueHtml+
-            '<div class="bildirim-section-head"><h3>Son bildirimler</h3><span>Son '+Math.min(rows.length,12)+' kayıt</span></div>'+historyHtml+
-            '<div class="bildirim-footer-actions"><button type="button" onclick="puanKuyrukDetayiniAc()">Kuyruk ve 13 kriteri ayrıntılı gör</button><button type="button" onclick="juriPuanGecmisiniAc()">Gönderdiğim puanların geçmişi</button></div>'+
-            '<p class="bildirim-disclaimer">Bildirimler bu tablette saklanır. Uygulama kapalıyken telefon bildirimi gönderilmez; başka tabletlerin kuyrukları bu ekranda görünmez.</p>';
-        puanGuvenceModaliniAc('Bildirim Merkezi',body);
-        try{puanDurumPaneliniGuncelle();}catch(_){}
+    function adminPuanBildirimZamani(x){
+        return Number(x?.updatedAt||x?.updatedClientAt||x?.puanGonderildiAt||x?.clientAt||x?.createdAt||0);
+    }
+    async function adminPuanBildirimleriniYukle(){
+        if(!adminYetkiliMi())return [];
+        try{
+            const kategoriler=['ORTAOKUL','LİSE'];
+            const snaps=await Promise.all(kategoriler.map(k=>db.ref('arsiv/juriSureOlaylari/'+k).limitToLast(300).once('value')));
+            const rows=[];
+            snaps.forEach((snap,i)=>snap.forEach(ch=>{
+                const v=ch.val()||{},durum=String(v.durum||'');
+                if(v.islem!=='puan_kayit_aktarimi'&&!durum.startsWith('puan_')&&!v.puanKayitId)return;
+                rows.push({...v,kategori:v.kategori||kategoriler[i],logId:ch.key});
+            }));
+            rows.sort((a,b)=>adminPuanBildirimZamani(b)-adminPuanBildirimZamani(a));
+            adminMerkeziPuanBildirimleriCache=rows;
+            adminPuanBildirimPaneliniCiz();
+            if(typeof ustGezinmeyiGuncelle==='function')ustGezinmeyiGuncelle();
+            return rows;
+        }catch(err){
+            const host=document.getElementById('adminGlobalPuanBildirimleri');
+            if(host)host.innerHTML='<div class="puanlama-bilgi hata">Merkezi jüri bildirimleri okunamadı: '+htmlEscape(err?.message||err)+'</div>';
+            console.warn('Merkezi jüri puan bildirimleri okunamadı:',err);
+            return [];
+        }
+    }
+    function adminPuanBildirimOkunmamisSayisi(){
+        const readAt=Number(localStorage.getItem(ADMIN_PUAN_BILDIRIM_OKUNDU_KEY)||0);
+        return adminMerkeziPuanBildirimleriCache.filter(x=>adminPuanBildirimZamani(x)>readAt).length;
+    }
+    function adminPuanBildirimDurumu(x){
+        const d=String(x?.durum||'');
+        if(d.startsWith('puanlar_gonderildi')||x?.puanGonderildi===true)return 'success';
+        if(d.includes('hata')||d.includes('yetki')||d.includes('kuyruk')||d.includes('dogrulanamadi')||x?.puanGonderildi===false)return 'warning';
+        return 'neutral';
+    }
+    function adminPuanBildirimKartiniHtml(x){
+        const s=x.secim||{},durum=String(x.durum||'Gönderim kaydı');
+        const stamp=adminPuanBildirimZamani(x);
+        const kisi=[x.okul||s.okul||'',x.ogrenci||String(s.ogr||'').split(' (')[0]].filter(Boolean).join(' · ');
+        const aciklama=x.hata||x.lastError||(x.puanGonderildi===true?'Puan Firebase’e yazıldı ve doğrulandı.':x.puanKuyrugaAlindi?'Puan gönderim kuyruğunda bekliyor; yönetici kontrolü gerekli.':'Puan gönderim işlemi kaydedildi.');
+        return '<article class="bildirim-item bildirim-'+adminPuanBildirimDurumu(x)+'"><div class="bildirim-item-head"><strong>'+
+            htmlEscape(x.macEtiketi||x.mac||x.macId||'Maç bilgisi yok')+'</strong><span>'+htmlEscape(durum)+'</span></div>'+
+            '<p><b>Öğrenci:</b> '+htmlEscape(kisi||'—')+'</p>'+
+            '<small>'+htmlEscape(x.kategori||'')+' · '+htmlEscape(x.juriAd||x.juri||'Jüri bilgisi yok')+' · '+htmlEscape(puanDurumTarihiYaz(stamp))+'</small>'+
+            '<p>'+htmlEscape(aciklama)+'</p>'+
+            (x.puanVerisi||x.puanlar?puanKriterDetayiHtml({puanlar:x.puanVerisi||x.puanlar}):'')+'</article>';
+    }
+    function adminPuanBildirimPaneliniCiz(){
+        const host=document.getElementById('adminGlobalPuanBildirimleri');if(!host)return;
+        const rows=adminMerkeziPuanBildirimleriCache.slice(0,6);
+        if(!rows.length){host.innerHTML='<div class="bildirim-empty">Henüz jüri cihazlarından merkezi puan gönderim kaydı gelmedi.</div>';return;}
+        host.innerHTML='<div class="bildirim-section-head"><h3>Son jüri işlemleri</h3><span>'+adminMerkeziPuanBildirimleriCache.length+' kayıt</span></div>'+
+            rows.map(adminPuanBildirimKartiniHtml).join('')+
+            '<button type="button" class="btn" style="margin-top:8px" onclick="bildirimMerkeziniAc()">Tüm bildirimleri gör</button>';
+    }
+    async function bildirimMerkeziniAc(){
+        if(!adminYetkiliMi())return;
+        puanGuvenceModaliniAc('Merkezi Bildirimler','<div class="bildirim-empty">Jüri tabletlerinden gelen kayıtlar yükleniyor…</div>');
+        const rows=await adminPuanBildirimleriniYukle();
+        if(!adminYetkiliMi()||!document.getElementById('puanGuvenceModal'))return;
+        const latest=rows.slice(0,30);
+        const pending=latest.filter(x=>x.puanGonderildi!==true&&(x.puanKuyrugaAlindi===true||String(x.durum||'').includes('baslatildi')||String(x.durum||'').includes('kuyruk')||String(x.durum||'').includes('hata')));
+        const body='<section class="bildirim-summary bildirim-'+(pending.length?'warning':'neutral')+'"><span class="bildirim-summary-icon">'+(pending.length?'!':'i')+'</span><div><strong>'+
+            (pending.length?pending.length+' bekleyen / kontrol gerektiren işlem':'Son 30 işlemde bekleyen durum yok')+
+            '</strong><p>Bu liste iki kategorideki jüri tabletlerinin Firebase denetim kayıtlarından oluşturulur.</p></div></section>'+
+            (latest.length?latest.map(adminPuanBildirimKartiniHtml).join(''):'<div class="bildirim-empty">Henüz merkezi jüri puan bildirimi bulunmuyor.</div>')+
+            '<p class="bildirim-disclaimer">Bu panel yönetici oturumu dışında açılmaz. Jüri tabletlerinde merkezi bildirim listesi gösterilmez.</p>';
+        puanGuvenceModaliniAc('Merkezi Bildirimler ('+rows.length+')',body);
+        try{localStorage.setItem(ADMIN_PUAN_BILDIRIM_OKUNDU_KEY,String(Date.now()));}catch(_){}
+        if(typeof ustGezinmeyiGuncelle==='function')ustGezinmeyiGuncelle();
     }
 
     function puanDurumPaneliniKur(){
@@ -749,6 +789,10 @@
     }
     function puanFirebaseDurumuGoster(){
         const els=[...document.querySelectorAll('#puanFirebaseDurumu')];
+        if(!adminYetkiliMi()){
+            els.forEach(el=>{el.textContent='';el.style.display='none';el.removeAttribute('role');});
+            return;
+        }
         const pending=Object.values(offlineKuyrukGetir()).filter(x=>x&&x.kayit);
         let durum=puanFirebaseAnlikDurum||puanFirebaseDurumuOku();
         if(pending.length){
@@ -768,7 +812,13 @@
         puanDurumPaneliniGuncelle();
     }
     function puanAnaMenuKartiniGuncelle(){
-        const host=document.getElementById('anaMenuPuanDurumu');if(!host)return;
+        const host=document.getElementById('anaMenuPuanDurumu');
+        if(!adminYetkiliMi()){
+            if(host){host.textContent='';host.style.display='none';}
+            const count=document.getElementById('anaMenuKuyrukSayisi');if(count)count.textContent='';
+            return;
+        }
+        if(!host)return;
         const pending=Object.values(offlineKuyrukGetir()).filter(x=>x&&x.kayit);
         const durum=puanFirebaseAnlikDurum||puanFirebaseDurumuOku();
         host.textContent=puanDurumOzetMetni();
@@ -1453,6 +1503,10 @@
                     <div class="admin-dashboard-head-note">🔔 Bildirimler sağ üstteki zil menüsünde</div>
                 </header>
 
+                <section class="admin-dashboard-group" style="margin:0 0 16px;">
+                    <header><span class="admin-group-icon">🔔</span><div><h2>Merkezi Jüri Bildirimleri</h2><p>Her iki kategorideki jüri tabletlerinin puan gönderim durumları</p></div></header>
+                    <div id="adminGlobalPuanBildirimleri"><div class="bildirim-empty">Jüri işlem kayıtları yükleniyor…</div></div>
+                </section>
                 <div class="admin-dashboard-groups">
                     <section class="admin-dashboard-group group-tournament">
                         <header><span class="admin-group-icon">🏆</span><div><h2>Turnuva Planlama</h2><p>Maçların ve resmî takvimin yönetimi</p></div></header>
@@ -1492,6 +1546,7 @@
                 </div>
             </main>`;
         puanFirebaseDurumuGoster();
+        void adminPuanBildirimleriniYukle();
     }
 
     async function juriPuanArsivGecmisiniYukle(){

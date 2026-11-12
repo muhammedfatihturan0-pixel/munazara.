@@ -634,10 +634,8 @@
                 bell.title='Puan gönderim bildirimleri ve bekleyen kayıtlar';
                 nav.appendChild(bell);
             }
-            const pending=typeof offlineKuyrukGetir==='function'
-                ?Object.values(offlineKuyrukGetir()).filter(x=>x&&x.kayit).length:0;
-            const unread=typeof puanBildirimOkunmamisSayisi==='function'?puanBildirimOkunmamisSayisi():0;
-            const badge=pending||unread;
+            const unread=typeof adminPuanBildirimOkunmamisSayisi==='function'?adminPuanBildirimOkunmamisSayisi():0;
+            const badge=unread;
             bell.innerHTML='🔔 Bildirimler'+(badge?'<span class="admin-notification-count">'+badge+'</span>':'');
         }else if(bell)bell.remove();
         const anasayfa=!!app.querySelector('main.home-shell:not(.admin-menu-shell) .home-head');

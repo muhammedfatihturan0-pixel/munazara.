@@ -323,9 +323,7 @@
                     <button class="btn" style="background:#1d4ed8; margin:0;" onclick="renderSureAnaEkran()">⏱ Konuşma Süreleri (Şifresiz)</button>
                     <button class="btn" style="margin:0;" onclick="anaMenu()">← Ana Ekran</button>
                 </div>
-                <div class="puan-guvence-juri-actions"><button type="button" onclick="juriPuanGecmisiniAc()">📚 Gönderdiğim puanlar</button><button type="button" onclick="puanKuyrukDetayiniAc()">📤 Bekleyen puanlar</button></div>
-                ${juriHtml}
-                <div id="puanFirebaseDurumu" class="puanlama-bilgi hata" role="alert" style="display:none;"></div>
+${juriHtml}
                 <section class="juri-step-block juri-step-category">
                     <div class="juri-step-heading"><span>01</span><div><b>Kategori</b><small>Öğrenci düzeyini seçin</small></div></div>
                     <div class="btn-grid juri-category-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0;">
@@ -1289,7 +1287,6 @@ Devam edilsin mi?`)){
                     </section>
                     <div id="kriterListesi" class="juri-criteria-grid"></div>
                     <div id="puanTaslakDurumu" class="puanlama-bilgi juri-draft-status">Puan seçimleriniz otomatik taslak olarak cihazda saklanır. Bu kayıt resmî puan değildir.</div>
-                    <div id="puanFirebaseDurumu" class="puanlama-bilgi hata" role="alert" style="display:none;"></div>
                     <div class="puanlama-action-bar">
                         <div class="puan-action-summary"><strong id="puanIlerlemeMini">0 / 13</strong><span>Kriter tamamlandı</span></div>
                         <button id="btnPuanGonder" class="btn" disabled onclick="puanlariGonder()">13 kriter tamamlanınca gönderilebilir</button>
