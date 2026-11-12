@@ -1387,6 +1387,12 @@ Devam edilsin mi?`)){
         const seciliFixture = puanlamaMaclar.get(secimler.macId);
         if(!juriOturumuSeciliMacaUygun(oturum,seciliFixture))
             return alert('Jüri kilidi seçili maçın günü/kategorisi için geçerli değil. Kilidi kaldırıp günün asıl jüri listesinden kendi adınızı seçin.');
+        if(navigator.onLine&&firebaseBagli){
+            const sahiplik=await juriKoltukSahipliginiAl(oturum);
+            if(!sahiplik.ok){
+                return alert('Bu cihaz artık '+oturum.juri+' koltuğunun sahibi değil. Koltuğu '+(sahiplik.current?.ad||'başka bir oturum')+' devralmış. Puanınız formda ve cihaz taslağında korundu; Firebase’e gönderilmedi.');
+            }
+        }
         secimler.juri = oturum.juri;
         secimler.juriAd = oturum.ad;
         const mac = mevcutMacBilgisi();
@@ -1400,7 +1406,12 @@ Devam edilsin mi?`)){
 
         const yerelZaman = Date.now();
         const kayitTemel = {
-            secim: { ...secimler, juri: oturum.juri, juriAd: oturum.ad },
+            secim: {
+                ...secimler,juri:oturum.juri,juriAd:oturum.ad,
+                juriOturumId:oturum.oturumId,juriClientId:oturum.clientId||getClientId(),
+                juriYedekMi:!!oturum.yedekMi,juriYedekYerine:oturum.yedekYerine||'',
+                juriAsilinAdi:oturum.asilinAdi||'',juriGunKey:oturum.gunKey,juriKategori:oturum.kategori
+            },
             puanlar: { ...verilenPuanlar },
             macId: mac.id,
             mac: macEskiEtiketi(mac.hukOkul, mac.muhOkul),
@@ -1496,6 +1507,20 @@ Devam edilsin mi?`)){
 
             // Doğrudan yalnızca bu jüriye ait kaydı yaz. Başka jürilerin kayıtları ve sayaç
             // bu işlem tarafından hiçbir zaman güncellenmez.
+            const sonKoltukYetkisi=await juriKoltukSahipliginiAl(oturum);
+            if(!sonKoltukYetkisi.ok){
+                const neden='Puan gönderimi sırasında jüri koltuğu '+(sonKoltukYetkisi.current?.ad||'başka bir oturum')+' tarafından devralındı. Bu cihazın puanı resmî kayda yazılmadı.';
+                puanKuyrukDurumunuGuncelle(secimler.kategori,kayitId,{queueStatus:'juri_koltuk_yetkisi_kayboldu',lastError:neden});
+                const engelli=offlineKuyrukGetir()[puanKuyrukAnahtari(secimler.kategori,kayitId)];
+                if(engelli)try{await juriKoltukYetkiKaydiniArsivle(engelli,neden);}catch(archiveErr){console.warn('Yetki devri puanı arşivlenemedi; cihaz kuyruğunda korundu:',archiveErr);}
+                await juriSureOturumLogunuGuncelle({durum:'puan_juri_koltuk_yetkisi_kayboldu',hata:neden,
+                    puanVerisi:{...kayitTemel.puanlar},kayitId,puanGonderildi:false,puanKuyrugaAlindi:true});
+                puanFirebaseDurumuYaz('warning',neden+' 13 kriterli taslak cihazda korundu.',{
+                    kayitId,macId:mac.id,ogr:secimler.ogr,juri:oturum.juri
+                });
+                alert(neden+' Puanı yöneticinin incelemesi gerekecek.');
+                return;
+            }
             firebaseYazmaDenendi=true;
             await puanKayitRef.set(kayit);
             const puanDogrulama=await firebasePuanKaydiniDogrula(puanKayitRef,kayit);

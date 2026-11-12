@@ -1,5 +1,5 @@
 
-    const APP_VERSION = '3.48 · Otomatik Ön Sonuç Açıklaması';
+    const APP_VERSION = '3.49 · Merkezi Jüri Koltuk Kilidi';
     const krit = [
         {t:"Argüman Mantıklı ve Tutarlı mı?", m:5}, {t:"Argümanlar Örneklerle Destekleniyor mu?", m:5}, {t:"Argümanın Güncel ve Bilimsel Verilere Dayanıyor mu?", m:5},
         {t:"Ses Tonu ve Vurgu", m:10}, {t:"Jest ve Mimiklerin Etkin Kullanımı", m:10}, {t:"Göz Teması ve Konuşma Hızı", m:5},
@@ -181,7 +181,10 @@
     const PUAN_TASLAK_KEY_PREFIX='munazaraPuanTaslakV1_';
     let aktifPuanTaslak=null;
     function puanTaslakBaglamiOlustur(mac,oturum){
-        const secim={...secimler,macId:mac.id,juri:oturum.juri,juriAd:oturum.ad};
+        const secim={...secimler,macId:mac.id,juri:oturum.juri,juriAd:oturum.ad,
+            juriOturumId:oturum.oturumId,juriClientId:oturum.clientId||getClientId(),
+            juriYedekMi:!!oturum.yedekMi,juriYedekYerine:oturum.yedekYerine||'',
+            juriAsilinAdi:oturum.asilinAdi||'',juriGunKey:oturum.gunKey,juriKategori:oturum.kategori};
         const kayitId=puanKayitKimligi(secim,mac.id);
         return {
             kategori:secimler.kategori,macId:mac.id,kayitId,secim,
@@ -201,12 +204,21 @@
         const durum=document.getElementById('puanTaslakDurumu');
         if(durum)durum.textContent='Taslak cihazda kaydedildi; Firebase yedeği kontrol ediliyor…';
         if(navigator.onLine&&firebaseBagli){
-            db.ref(ctx.cloudPath).transaction(cur=>{
-                const tamamlandiAt=Number(cur?.tamamlandiAt||0);
-                if(cur?.durum==='gonderildi'&&tamamlandiAt>=Number(veri.localUpdatedAt||0))return cur;
-                if(Number(cur?.localUpdatedAt||0)>Number(veri.localUpdatedAt||0))return cur;
-                return {...veri,updatedAt:firebase.database.ServerValue.TIMESTAMP};
-            },undefined,false).then(result=>{
+            const oturum=juriOturumuGetir();
+            void juriKoltukSahipliginiAl(oturum).then(kilit=>{
+                if(!kilit.ok){
+                    if(aktifPuanTaslak===ctx&&document.getElementById('puanTaslakDurumu'))
+                        document.getElementById('puanTaslakDurumu').textContent='⚠ Bu cihaz jüri koltuğunu devretmiş; bulut taslağına yazılmadı. Cihaz taslağı korundu.';
+                    return null;
+                }
+                return db.ref(ctx.cloudPath).transaction(cur=>{
+                    const tamamlandiAt=Number(cur?.tamamlandiAt||0);
+                    if(cur?.durum==='gonderildi'&&tamamlandiAt>=Number(veri.localUpdatedAt||0))return cur;
+                    if(Number(cur?.localUpdatedAt||0)>Number(veri.localUpdatedAt||0))return cur;
+                    return {...veri,updatedAt:firebase.database.ServerValue.TIMESTAMP};
+                },undefined,false);
+            }).then(result=>{
+                if(!result)return;
                 if(aktifPuanTaslak===ctx&&document.getElementById('puanTaslakDurumu'))
                     document.getElementById('puanTaslakDurumu').textContent=result.committed
                         ?'✓ Taslak cihazda ve Firebase’de otomatik kaydedildi.':'✓ Daha yeni bir taslak veya gönderim kaydı korundu.';
@@ -296,7 +308,15 @@
     }
 
     function juriOturumuGetir() {
-        try { return JSON.parse(localStorage.getItem(JURI_OTURUM_KEY) || 'null'); } catch (_) { return null; }
+        try {
+            const oturum=JSON.parse(localStorage.getItem(JURI_OTURUM_KEY)||'null');
+            if(!oturum)return null;
+            let degisti=false;
+            if(!oturum.clientId){oturum.clientId=getClientId();degisti=true;}
+            if(!oturum.oturumId){oturum.oturumId=juriOturumIdOlustur();degisti=true;}
+            if(degisti)localStorage.setItem(JURI_OTURUM_KEY,JSON.stringify(oturum));
+            return oturum;
+        } catch (_) { return null; }
     }
 
     async function juriOturumuKilitle(juri, ad) {
@@ -323,7 +343,12 @@
         const oncekiOturum=juriOturumuGetir();
         if(oncekiOturum)await juriCihazDurumunuOturumunuKapat(oncekiOturum,'juri_kilidi_degisti');
         const oturum = { juri, ad: temizAd, yedekMi:false, gunKey: baglam.gunKey, gunLabel: baglam.gunLabel,
-            kategori: baglam.kategori, lockedAt: Date.now(), clientId: getClientId() };
+            kategori: baglam.kategori, lockedAt: Date.now(), clientId: getClientId(),oturumId:juriOturumIdOlustur() };
+        const sahiplik=await juriKoltukSahipliginiAl(oturum,{asliGeriDondu:true});
+        if(!sahiplik.ok){
+            alert('Bu jüri koltuğu şu anda '+(sahiplik.current?.ad||'başka bir cihaz')+' tarafından kullanılıyor. Aynı koltuk iki cihazda eşzamanlı açılamaz. Önce diğer cihazdaki oturumu kapatın veya yedek jüri devir işlemini kullanın.');
+            return;
+        }
         localStorage.setItem(JURI_OTURUM_KEY, JSON.stringify(oturum));
         secimler.juri = juri;
         secimler.juriAd = temizAd;
@@ -356,12 +381,17 @@
         if (!confirm(soru)) return;
         // Puan kaydında 1./2./3. jüri rolü korunur; yedek kişi seçilen koltuğa vekâleten puan girer.
         const oncekiOturum=juriOturumuGetir();
-        if(oncekiOturum)void juriCihazDurumunuOturumunuKapat(oncekiOturum,'juri_kilidi_degisti');
+        if(oncekiOturum)await juriCihazDurumunuOturumunuKapat(oncekiOturum,'juri_kilidi_degisti');
         const oturum = {
             juri, ad: yedekAd, yedekMi:true, yedekYerine:juri, asilinAdi:asilAd,
             gunKey:baglam.gunKey, gunLabel:baglam.gunLabel, kategori:baglam.kategori,
-            lockedAt:Date.now(), clientId:getClientId()
+            lockedAt:Date.now(), clientId:getClientId(),oturumId:juriOturumIdOlustur()
         };
+        const sahiplik=await juriKoltukSahipliginiAl(oturum,{yedekDevri:true});
+        if(!sahiplik.ok){
+            alert('Yedek jüri koltuğu devralamadı: '+(sahiplik.reason||'Merkezi sahiplik doğrulanamadı.'));
+            return;
+        }
         localStorage.setItem(JURI_OTURUM_KEY, JSON.stringify(oturum));
         secimler.juri = juri;
         secimler.juriAd = yedekAd;
@@ -454,6 +484,89 @@
             !['ortaokul','lise'].includes(String(oturum?.kategori||'')))return null;
         return db.ref(JURI_CANLI_DURUM_YOLU+'/'+oturum.gunKey+'/'+oturum.kategori+'/'+slot);
     }
+
+    // Asıl ve yedek jüri aynı resmî koltuğu kullanır; kilit aynı anda yalnızca
+    // bir cihazın o koltuk adına puan/taslak yazabilmesini sağlar.
+    const JURI_KOLTUK_KIRA_MS=600000;
+    function juriOturumIdOlustur(){
+        const raw=String(Date.now())+'|'+Math.random()+'|'+getClientId();
+        return 'jo_'+hash32(raw,2166136261)+hash32(raw,3339675911);
+    }
+    function juriKoltukSahiplikRefOlustur(oturum){
+        const ref=juriCanliDurumRefOlustur(oturum);
+        return ref?ref.child('sahiplik'):null;
+    }
+    async function juriKoltukSahipliginiAl(oturum,options={}){
+        if(!oturum||!navigator.onLine||!firebaseBagli)return {ok:false,reason:'Jüri koltuğu Firebase üzerinden doğrulanamadı.'};
+        if(!oturum.oturumId||!oturum.clientId||oturum.clientId!==getClientId())
+            return {ok:false,reason:'Jüri oturumu bu cihazla eşleşmiyor. Oturumu yeniden kilitleyin.'};
+        const ref=juriKoltukSahiplikRefOlustur(oturum);
+        if(!ref)return {ok:false,reason:'Jüri koltuğunun gün/kategori bilgisi geçersiz.'};
+        const now=Date.now();
+        const yeniSahip={
+            version:1,oturumId:oturum.oturumId,clientId:oturum.clientId,
+            juri:oturum.juri,ad:oturum.ad||'',yedekMi:!!oturum.yedekMi,
+            yedekYerine:oturum.yedekYerine||'',asilinAdi:oturum.asilinAdi||'',
+            active:true,lastSeenAt:now,expiresAt:now+JURI_KOLTUK_KIRA_MS
+        };
+        const tx=await ref.transaction(current=>{
+            const ayni=current&&current.oturumId===oturum.oturumId&&current.clientId===oturum.clientId;
+            const suresiDoldu=!current||current.active===false||!Number(current.expiresAt)||Number(current.expiresAt)<=now;
+            const yedekDevri=options.yedekDevri===true&&oturum.yedekMi===true;
+            const asilGeriDondu=options.asliGeriDondu===true&&oturum.yedekMi!==true&&
+                current?.yedekMi===true&&current?.juri===oturum.juri&&
+                puanMetniNormalize(current?.asilinAdi)===puanMetniNormalize(oturum.ad);
+            if(!ayni&&!suresiDoldu&&!yedekDevri&&!asilGeriDondu)return;
+            return {
+                ...yeniSahip,
+                claimedAt:ayni?Number(current.claimedAt||now):now,
+                generation:ayni?Number(current.generation||1):Number(current?.generation||0)+1
+            };
+        },undefined,false);
+        const current=tx.snapshot?tx.snapshot.val():null;
+        const ok=!!(tx.committed&&current&&current.oturumId===oturum.oturumId&&current.clientId===oturum.clientId);
+        return {ok,current,reason:ok?'':('Bu koltuk şu anda '+(current?.ad||'başka bir jüri oturumu')+' tarafından kullanılıyor.')};
+    }
+    async function juriKoltukSahipliginiBirak(oturum){
+        const ref=juriKoltukSahiplikRefOlustur(oturum);
+        if(!ref||!oturum?.oturumId||!oturum?.clientId||!navigator.onLine||!firebaseBagli)return false;
+        const now=Date.now();
+        const tx=await ref.transaction(current=>{
+            if(!current||current.oturumId!==oturum.oturumId||current.clientId!==oturum.clientId)return;
+            return {...current,active:false,releasedAt:now,lastSeenAt:now,expiresAt:0};
+        },undefined,false);
+        return !!tx.committed;
+    }
+    async function juriKoltukKuyrukKaydiniDogrula(item){
+        const kayit=item?.kayit||{},sec=kayit.secim||{};
+        const juri=sec.juri||item?.juri||'';
+        const clientId=sec.juriClientId||kayit.clientId||'';
+        const juriAd=sec.juriAd||'';
+        const oturumId=sec.juriOturumId||kayit.juriOturumId||'';
+        const kategori=sec.juriKategori||(item?.kategori==='LİSE'?'lise':'ortaokul');
+        const gunKey=sec.juriGunKey||'';
+        if(!gunKey||!kategori)return {ok:false,reason:'Bu eski çevrimdışı kayıt gün/oturum kimliğini taşımıyor. Yanlış jüri gününe aktarılmasın diye otomatik gönderim durduruldu; kayıt cihaz kuyruğunda korundu.'};
+        const aktif=juriOturumuGetir();
+        const ayniKoltuk=!!(aktif&&aktif.juri===juri&&aktif.kategori===kategori&&aktif.gunKey===gunKey);
+        const ayniOturum=ayniKoltuk&&aktif.clientId===clientId&&
+            (oturumId?aktif.oturumId===oturumId:puanMetniNormalize(aktif.ad)===puanMetniNormalize(juriAd));
+        if(ayniOturum)await juriKoltukSahipliginiAl(aktif);
+        const context=ayniKoltuk?aktif:{
+            juri,clientId,oturumId,ad:juriAd,gunKey,kategori,
+            yedekMi:!!sec.juriYedekMi,yedekYerine:sec.juriYedekYerine||'',
+            asilinAdi:sec.juriAsilinAdi||''
+        };
+        const ref=juriKoltukSahiplikRefOlustur(context);
+        if(!ref)return {ok:false,reason:'Çevrimdışı puanın jüri koltuğu/gün bilgisi doğrulanamadı.'};
+        const snap=await ref.once('value');
+        const current=snap.val();
+        const kisiAyni=oturumId
+            ?current?.oturumId===oturumId&&current?.clientId===clientId
+            :!!clientId&&current?.clientId===clientId&&puanMetniNormalize(current?.ad)===puanMetniNormalize(juriAd);
+        const ok=!!(current&&current.active!==false&&Number(current.expiresAt||0)>Date.now()&&
+            current.juri===juri&&kisiAyni);
+        return {ok,current,reason:ok?'':('Çevrimdışı puan artık bu koltuğun sahibi olmayan '+(juriAd||'eski oturum')+' tarafından gönderilmiş. Yetkili mevcut kullanıcı: '+(current?.ad||'belirsiz')+'.')};
+    }
     function juriCihazDurumVerisiOlustur(oturum){
         const queue=offlineKuyrukGetir();
         const pending=Object.values(queue).filter(x=>{
@@ -469,7 +582,7 @@
             online:true,connectionStatus:'online',
             juri:oturum.juri,ad:oturum.ad||'',yedekMi:!!oturum.yedekMi,
             yedekYerine:oturum.yedekYerine||'',asilinAdi:oturum.asilinAdi||'',
-            gunKey:oturum.gunKey,kategori:oturum.kategori,clientId:getClientId(),
+            oturumId:oturum.oturumId||'',gunKey:oturum.gunKey,kategori:oturum.kategori,clientId:getClientId(),
             appVersion:APP_VERSION,screen:scoringOpen?'puanlama':selectionOpen?'juri_secim':'uygulama',
             macId:secimler.macId||'',macEtiketi:matchLabel||'',
             taraf:secimler.taraf||'',okul:secimler.okul||'',
@@ -488,6 +601,8 @@
         const oturum=juriOturumuGetir();
         const ref=juriCanliDurumRefOlustur(oturum);
         if(!ref||!firebaseBagli||!navigator.onLine)return false;
+        const sahiplik=await juriKoltukSahipliginiAl(oturum);
+        if(!sahiplik.ok)return false;
         const yol=ref.toString();
         if(forceDisconnectRegistration||juriCanliDisconnectKaydiYol!==yol){
             try{
@@ -511,7 +626,13 @@
         const ref=juriCanliDurumRefOlustur(oturum);
         if(!ref||!firebaseBagli||!navigator.onLine)return false;
         try{
-            await ref.update({
+            await juriKoltukSahipliginiBirak(oturum);
+            const liveSnap=await ref.once('value');
+            const live=liveSnap.val();
+            const ayniCihaz=live?.oturumId
+                ?live.oturumId===oturum.oturumId&&live.clientId===oturum.clientId
+                :live?.clientId===oturum.clientId&&puanMetniNormalize(live?.ad)===puanMetniNormalize(oturum?.ad);
+            if(ayniCihaz)await ref.update({
                 online:false,connectionStatus:'oturum_kapali',screen:'kapali',
                 closeReason:neden,disconnectedAt:firebase.database.ServerValue.TIMESTAMP,
                 lastSeenClientAt:Date.now()
@@ -550,7 +671,7 @@
         const pending=Object.values(offlineKuyrukGetir()).filter(x=>x&&x.kayit);
         const durum=puanFirebaseAnlikDurum||puanFirebaseDurumuOku();
         if(pending.length){
-            const problem=pending.some(x=>['yetki_hatasi','mac_kapali','mac_iptal','sure_engeli_arsiv_bekliyor'].includes(x.queueStatus)||x.lastError);
+            const problem=pending.some(x=>['yetki_hatasi','mac_kapali','mac_iptal','sure_engeli_arsiv_bekliyor','juri_koltuk_yetkisi_kayboldu'].includes(x.queueStatus)||x.lastError);
             return (problem?'Dikkat: ':'Bekleyen: ')+pending.length+' puan Firebase’de henüz doğrulanmadı.';
         }
         if(durum?.mesaj)return String(durum.mesaj)+' ('+puanDurumTarihiYaz(durum.updatedAt)+')';
@@ -761,6 +882,31 @@
         const bulut=snap.val();
         return {ok:firebasePuanKaydiEslesiyor(bulut, beklenen),bulut};
     }
+    async function juriKoltukYetkiKaydiniArsivle(item,neden){
+        if(!item?.kayit||!item?.kategori||!item?.macId||!item?.kayitId)
+            throw new Error('Jüri koltuk yetkisi arşivi için maç/kayıt bilgisi eksik.');
+        const sec=item.kayit.secim||{};
+        const eventKey=[sec.juriOturumId||item.kayit.clientId||'legacy',item.kayit.localUpdatedAt||item.queuedAt||Date.now()].join('|');
+        const eventId='e_'+hash32(eventKey,2166136261)+hash32(eventKey,3339675911);
+        const ref=db.ref('arsiv/juriPuanYedekleri/'+item.kategori+'/'+item.macId+'/'+item.kayitId+'/yetkiKaybi/'+eventId);
+        const arsivKaydi={...item.kayit,reddedildi:true,
+            queueStatus:'juri_koltuk_yetkisi_kayboldu',
+            reddedilmeNedeni:String(neden||'Jüri koltuğu başka oturuma devredildi.'),
+            reddedildiAt:firebase.database.ServerValue.TIMESTAMP,
+            yedekAt:firebase.database.ServerValue.TIMESTAMP,
+            yedekOlayi:'juri_koltuk_sahipligi_degisimi'};
+        await ref.set(arsivKaydi);
+        const kontrol=await ref.once('value');
+        if(!firebasePuanKaydiEslesiyor(kontrol.val(),item.kayit))
+            throw new Error('Jüri koltuk devri puan arşivi geri okunarak doğrulanamadı.');
+        await puanAktarimDenetiminiGuncelle(item,{
+            durum:'puan_juri_koltuk_yetkisi_kayboldu',hata:String(neden||'Jüri koltuğu devredildi.'),
+            puanVerisi:{...(item.kayit.puanlar||{})},puanKayitId:item.kayitId,
+            puanGonderildi:false,puanKuyrugaAlindi:true,reddedilenPuanArsivlendi:true
+        });
+        return true;
+    }
+
     async function puanReddedilenKaydiniArsivle(item,neden,durum='puan_gonderimi_arsivlendi'){
         if(!item?.kayit||!item?.kategori||!item?.macId||!item?.kayitId)
             throw new Error('Reddedilen puan arşivi için maç/kayıt bilgisi eksik.');
@@ -875,6 +1021,24 @@
             for (const key of keys) {
                 const item = q[key];
                 try {
+                    if(item.queueStatus==='juri_koltuk_yetkisi_kayboldu')continue;
+                    const sahiplik=await juriKoltukKuyrukKaydiniDogrula(item);
+                    if(!sahiplik.ok){
+                        const neden=sahiplik.reason||'Jüri koltuğu devredilmiş; eski oturum puanı resmî kayda aktarılmadı.';
+                        const engelli={...item,queueStatus:'juri_koltuk_yetkisi_kayboldu',lastError:neden};
+                        q[key]=engelli;degisti=true;offlineKuyrukKaydet(q);
+                        try{await juriKoltukYetkiKaydiniArsivle(engelli,neden);}
+                        catch(archiveErr){console.warn('Yetkisi biten jüri kuyruğu arşivlenemedi; cihaz kuyruğunda korundu:',archiveErr);}
+                        await puanAktarimDenetiminiGuncelle(engelli,{
+                            durum:'puan_juri_koltuk_yetkisi_kayboldu',hata:neden,
+                            queueStatus:'juri_koltuk_yetkisi_kayboldu',
+                            puanVerisi:{...(item.kayit?.puanlar||{})},puanGonderildi:false,puanKuyrugaAlindi:true
+                        });
+                        puanFirebaseDurumuYaz('warning',neden+' 13 kriterli puan cihaz kuyruğunda korundu; resmî puan üzerine yazılmadı.',{
+                            kayitId:item.kayitId,macId:item.macId,ogr:item.kayit?.secim?.ogr,juri:item.kayit?.secim?.juri
+                        });
+                        continue;
+                    }
                     // Gönderim fonksiyonu ön kontrollerdeyse ikinci worker kayıtla yarışmaz.
                     if(['gonderim_on_kontrol','gonderim_devam_ediyor'].includes(item.queueStatus)){
                         const baslangic=Number(item.gonderimBaslatmaAt||item.queuedAt||Date.now());
